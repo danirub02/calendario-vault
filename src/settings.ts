@@ -34,6 +34,7 @@ interface Host extends Plugin {
 export class CalendarioSettingTab extends PluginSettingTab {
   private pending: PendingAuth | null = null;
   private pastedUrl = "";
+  private authUrl = "";
 
   constructor(
     app: App,
@@ -83,13 +84,26 @@ export class CalendarioSettingTab extends PluginSettingTab {
           if (!g.clientId || !g.clientSecret) return new Notice("Inserisci Client ID e Client secret");
           const { url, pending } = await buildAuthUrl(g);
           this.pending = pending;
-          window.open(url);
+          this.authUrl = url;
+          // Su iPhone window.open dopo un await viene bloccato: mostro anche un link da toccare
+          try {
+            window.open(url);
+          } catch {
+            // ignorato: resta il link sotto
+          }
+          this.display();
         }),
       );
+    if (this.authUrl) {
+      const row = containerEl.createDiv({ cls: "setting-item-description" });
+      row.createEl("a", { text: "Tocca qui per aprire il login Google", href: this.authUrl });
+      row.createEl("div", { text: "Se il browser non si apre, copia il link:" });
+      row.createEl("input", { type: "text", value: this.authUrl, attr: { readonly: "true", style: "width:100%" } });
+    }
     new Setting(containerEl)
       .setName("URL di ritorno")
       .addText((t) => {
-        t.setPlaceholder(`${REDIRECT_URI}/?state=...&code=...`).onChange((v) => (this.pastedUrl = v));
+        t.setPlaceholder(`${REDIRECT_URI}/?state=...&code=...`).setValue(this.pastedUrl).onChange((v) => (this.pastedUrl = v));
       })
       .addButton((b) =>
         b.setButtonText("Conferma").onClick(async () => {
@@ -100,6 +114,8 @@ export class CalendarioSettingTab extends PluginSettingTab {
             if (i >= 0) g.accounts[i] = { ...acc, refreshToken: acc.refreshToken || g.accounts[i].refreshToken };
             else g.accounts.push(acc);
             this.pending = null;
+            this.authUrl = "";
+            this.pastedUrl = "";
             await this.plugin.saveSettings();
             new Notice(`Collegato: ${acc.email}`);
             this.display();
