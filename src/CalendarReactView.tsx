@@ -547,7 +547,6 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
         timeGridDay: "Giorno",
       }}
       dayHeaderFormat={narrow ? { weekday: "narrow" } : undefined}
-      dayMaxEvents={narrow ? 3 : false}
       navLinks={narrow}
       navLinkDayClick="timeGridDay"
       longPressDelay={400}

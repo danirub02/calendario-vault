@@ -406,12 +406,15 @@ body {
     margin-bottom: 0;
   }
 
-  /* Nelle celle del mese una riga sola; nelle viste a ore il titolo va a capo nello spazio dell'evento */
-  .fc-daygrid-event .bases-calendar-event-content,
+  /* Nelle celle del mese il titolo occupa al massimo due righe; nelle viste a ore va a capo nello spazio dell'evento */
   .fc-daygrid-event .bases-calendar-event-title {
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
   }
 
   .fc-timegrid-event .bases-calendar-event-content,
@@ -425,8 +428,4 @@ body {
     font-size: 10px;
   }
 
-  .fc-more-link {
-    font-size: 10px;
-    color: var(--text-muted);
-  }
 }
