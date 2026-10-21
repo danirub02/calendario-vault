@@ -5,17 +5,20 @@ import type {
   EventContentArg,
   EventDropArg,
 } from "@fullcalendar/core";
+import itLocale from "@fullcalendar/core/locales/it";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import FullCalendar from "@fullcalendar/react";
 import { BasesEntry, BasesPropertyId, DateValue, Notice, Value } from "obsidian";
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { useApp } from "./hooks";
 import { ExternalCalendar, loadExternalEvents } from "./external";
 import { DropPos, dropToFields } from "./date-utils";
 import { formFromGoogle, GoogleCtx, GoogleEventRef, updateGoogleEvent } from "./google";
+
+const NARROW_PX = 600;
 
 export interface CalendarHandle {
   updateSize(): void;
@@ -45,6 +48,7 @@ interface CalendarReactViewProps {
   onEventDrop?: (entry: BasesEntry, drop: DropPos) => Promise<void>;
   // Note in questa cartella non si trascinano (es. promemoria generati)
   lockedFolder?: string;
+  containerEl: HTMLElement;
   calendarHandleRef?: React.RefObject<CalendarHandle | null>;
 }
 
@@ -62,6 +66,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
   onEntryContextMenu,
   onEventDrop,
   lockedFolder,
+  containerEl,
   calendarHandleRef,
 }) => {
   const app = useApp();
@@ -70,6 +75,51 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
   // when a new popover opens, the old one on the same parent is dismissed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hoverParentRef = useRef<{ hoverPopover: any }>({ hoverPopover: null });
+
+  // Pannello stretto (iPhone, split piccolo): layout compatto, navigazione a tocco e swipe
+  const [narrow, setNarrow] = useState(containerEl.clientWidth > 0 && containerEl.clientWidth < NARROW_PX);
+  useEffect(() => {
+    const ro = new ResizeObserver(() => {
+      const w = containerEl.clientWidth;
+      if (w > 0) setNarrow(w < NARROW_PX);
+    });
+    ro.observe(containerEl);
+    return () => ro.disconnect();
+  }, [containerEl]);
+  useEffect(() => {
+    containerEl.toggleClass("is-narrow", narrow);
+    return () => containerEl.removeClass("is-narrow");
+  }, [containerEl, narrow]);
+  // Swipe orizzontale = periodo precedente/successivo (non se parte da un evento: lì c'è il trascinamento)
+  useEffect(() => {
+    if (!narrow) return;
+    let x0 = 0,
+      y0 = 0,
+      t0 = 0,
+      active = false;
+    const down = (e: TouchEvent) => {
+      active = e.touches.length === 1 && !(e.target as HTMLElement).closest(".fc-event, .fc-popover");
+      x0 = e.touches[0].clientX;
+      y0 = e.touches[0].clientY;
+      t0 = Date.now();
+    };
+    const up = (e: TouchEvent) => {
+      if (!active) return;
+      active = false;
+      const dx = e.changedTouches[0].clientX - x0;
+      const dy = e.changedTouches[0].clientY - y0;
+      if (Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) / 2 || Date.now() - t0 > 600) return;
+      const api = calendarRef.current?.getApi();
+      if (dx < 0) api?.next();
+      else api?.prev();
+    };
+    containerEl.addEventListener("touchstart", down, { passive: true });
+    containerEl.addEventListener("touchend", up, { passive: true });
+    return () => {
+      containerEl.removeEventListener("touchstart", down);
+      containerEl.removeEventListener("touchend", up);
+    };
+  }, [containerEl, narrow]);
 
   // Expose updateSize to the parent view for resize/tab-switch handling
   useEffect(() => {
@@ -426,7 +476,8 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
 
       if (validProperties.length > 0) {
         const firstProperty = validProperties[0];
-        const remainingProperties = validProperties.slice(1);
+        // Stretto: solo il titolo, le altre proprietà non entrano nello schermo
+        const remainingProperties = narrow ? [] : validProperties.slice(1);
 
         return (
           <div className="bases-calendar-event-content">
@@ -457,7 +508,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
         );
       }
     },
-    [properties, app, hasNonEmptyValue],
+    [properties, app, hasNonEmptyValue, narrow],
   );
 
   return (
@@ -482,16 +533,26 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       slotLabelFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
       eventTimeFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
       firstDay={weekStartDay}
-      headerToolbar={{
-        left: "",
-        center: "title",
-        right: "prev,today,next",
-      }}
+      locale={itLocale}
+      headerToolbar={
+        narrow
+          ? { left: "prev,next", center: "title", right: "today" }
+          : { left: "", center: "title", right: "prev,today,next" }
+      }
+      footerToolbar={narrow ? { center: "dayGridMonth,timeGridWeek,timeGridDay" } : false}
       buttonText={{
         today: "Oggi",
+        dayGridMonth: "Mese",
+        timeGridWeek: "Settimana",
+        timeGridDay: "Giorno",
       }}
+      dayHeaderFormat={narrow ? { weekday: "narrow" } : undefined}
+      dayMaxEvents={narrow ? 3 : false}
+      navLinks={narrow}
+      navLinkDayClick="timeGridDay"
+      longPressDelay={400}
+      eventLongPressDelay={400}
       allDayText="Tutto il giorno"
-      navLinks={false}
       events={fetchEvents}
       eventDidMount={(info) => {
         const bg = info.event.extendedProps.evColor as string | undefined;

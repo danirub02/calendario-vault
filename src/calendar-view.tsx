@@ -181,6 +181,7 @@ export class CalendarView extends BasesView {
               this.showEntryContextMenu(evt.nativeEvent, entry);
             }}
             onEventDrop={(entry, drop) => this.updateEntryDates(entry, drop)}
+            containerEl={this.containerEl}
             lockedFolder={this.plugin.settings.reminders.enabled ? this.plugin.settings.reminders.remFolder : undefined}
             calendarHandleRef={this.calendarHandleRef}
           />

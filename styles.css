@@ -347,3 +347,76 @@ body {
   padding: 2px 0px;
 }
 
+
+/* Pannello stretto (iPhone): classe `is-narrow` messa dal componente sotto i 600px */
+.bases-calendar-container.is-narrow {
+  .fc-header-toolbar {
+    padding: 4px !important;
+  }
+
+  .fc-toolbar-title {
+    font-size: 16px !important;
+    text-transform: capitalize;
+  }
+
+  .fc .fc-button {
+    padding: 6px 10px !important;
+    font-size: var(--font-ui-small) !important;
+  }
+
+  .fc-footer-toolbar {
+    padding: 6px 4px !important;
+    justify-content: center;
+  }
+
+  .fc-col-header-cell {
+    padding: 6px 0px !important;
+  }
+
+  .fc-daygrid-day-number {
+    font-size: 11px !important;
+    padding: 1px 3px !important;
+  }
+
+  a.fc-daygrid-day-number,
+  a.fc-col-header-cell-cushion {
+    cursor: pointer !important;
+  }
+
+  .fc-daygrid-day-frame {
+    min-height: 64px;
+  }
+
+  .fc-event {
+    margin-bottom: 1px !important;
+  }
+
+  .fc-daygrid-event {
+    margin-left: 1px !important;
+    margin-right: 1px !important;
+  }
+
+  .bases-calendar-event-content {
+    padding: 1px 3px;
+    font-size: 10px;
+    line-height: 1.25;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .bases-calendar-event-title {
+    margin-bottom: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .fc-timegrid-slot-label,
+  .fc-timegrid-axis-cushion {
+    font-size: 10px;
+  }
+
+  .fc-more-link {
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+}
