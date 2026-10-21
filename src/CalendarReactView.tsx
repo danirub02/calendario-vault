@@ -9,12 +9,13 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import FullCalendar from "@fullcalendar/react";
-import { BasesEntry, BasesPropertyId, DateValue, Value } from "obsidian";
+import { BasesEntry, BasesPropertyId, DateValue, Notice, Value } from "obsidian";
 import React, { useCallback, useEffect, useRef } from "react";
 
 import { useApp } from "./hooks";
 import { ExternalCalendar, loadExternalEvents } from "./external";
-import type { GoogleCtx, GoogleEventRef } from "./google";
+import { DropPos, dropToFields } from "./date-utils";
+import { formFromGoogle, GoogleCtx, GoogleEventRef, updateGoogleEvent } from "./google";
 
 export interface CalendarHandle {
   updateSize(): void;
@@ -41,12 +42,9 @@ interface CalendarReactViewProps {
   properties: BasesPropertyId[];
   onEntryClick: (entry: BasesEntry, isModEvent: boolean) => void;
   onEntryContextMenu: (evt: React.MouseEvent, entry: BasesEntry) => void;
-  onEventDrop?: (
-    entry: BasesEntry,
-    newStart: Date,
-    newEnd?: Date,
-  ) => Promise<void>;
-  editable: boolean;
+  onEventDrop?: (entry: BasesEntry, drop: DropPos) => Promise<void>;
+  // Note in questa cartella non si trascinano (es. promemoria generati)
+  lockedFolder?: string;
   calendarHandleRef?: React.RefObject<CalendarHandle | null>;
 }
 
@@ -63,7 +61,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
   onEntryClick,
   onEntryContextMenu,
   onEventDrop,
-  editable,
+  lockedFolder,
   calendarHandleRef,
 }) => {
   const app = useApp();
@@ -109,6 +107,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
 
   const events = entries.map((calEntry) => {
     const color = colorFor(calEntry.entry);
+    const locked = !!lockedFolder && calEntry.entry.file.path.startsWith(lockedFolder + "/");
     const timed = hasTime(calEntry.startDate) || hasTime(calEntry.endDate);
     if (timed) {
       // Evento che attraversa la mezzanotte (es. 23:00 → 06:00 senza endDate):
@@ -124,6 +123,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
         start: calEntry.startDate,
         end,
         allDay: false,
+        editable: !locked,
         extendedProps: {
           entry: calEntry.entry,
           originalEndDate: calEntry.endDate,
@@ -164,6 +164,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       start: calEntry.startDate,
       end: adjustedEndDate,
       allDay: true,
+      editable: !locked,
       extendedProps: {
         evColor: color.backgroundColor,
         evText: color.textColor,
@@ -192,6 +193,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       // Orario originale (prima dell'eventuale divisione a mezzanotte) per l'etichetta
       const extWithTime = ext.map((e) => ({
         ...e,
+        editable: !!e.extendedProps?.google,
         extendedProps: { ...e.extendedProps, origStart: e.start, origEnd: e.end },
       }));
       const all = [...eventsRef.current, ...extWithTime];
@@ -300,40 +302,32 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
 
   const handleEventDrop = useCallback(
     async (dropInfo: EventDropArg) => {
-      if (!onEventDrop) {
+      const ev = dropInfo.event;
+      if (!ev.start) {
         dropInfo.revert();
         return;
       }
-
-      const entry = dropInfo.event.extendedProps.entry as BasesEntry;
-      const originalEndDate = dropInfo.event.extendedProps.originalEndDate as
-        | Date
-        | undefined;
-      const newStart = dropInfo.event.start;
-      const newEnd = dropInfo.event.end;
-
-      if (!newStart) {
-        dropInfo.revert();
-        return;
-      }
-
-      // Calculate the actual end date to save
-      let actualEndDate: Date | undefined = undefined;
-      if (originalEndDate) {
-        if (newEnd) {
-          // FullCalendar gave us an adjusted end date, we need to subtract one day to get the actual end date
-          actualEndDate = new Date(newEnd);
-          actualEndDate.setDate(actualEndDate.getDate() - 1);
-        } else {
-          // Single day event - use the start date as the end date
-          actualEndDate = new Date(newStart);
-        }
-      }
-
+      const drop: DropPos = { start: ev.start, end: ev.end, allDay: ev.allDay };
       try {
-        await onEventDrop(entry, newStart, actualEndDate);
-      } catch {
+        if (ev.extendedProps.external) {
+          const ref = ev.extendedProps.google as GoogleEventRef | undefined;
+          if (!ref) throw new Error("evento non modificabile");
+          const form = {
+            ...formFromGoogle(ref, {
+              location: ev.extendedProps.location as string,
+              description: ev.extendedProps.description as string,
+            }),
+            ...dropToFields(drop),
+          };
+          await updateGoogleEvent(ctxRef.current, ref, form);
+          calendarRef.current?.getApi().refetchEvents();
+        } else {
+          if (!onEventDrop) throw new Error("trascinamento non disponibile");
+          await onEventDrop(ev.extendedProps.entry as BasesEntry, drop);
+        }
+      } catch (e) {
         dropInfo.revert();
+        new Notice(`Spostamento fallito: ${(e as Error).message}`, 6000);
       }
     },
     [onEventDrop],
@@ -513,7 +507,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       fixedWeekCount={viewType === "month"}
       fixedMirrorParent={document.body ?? undefined}
       eventDurationEditable={false}
-      editable={editable}
+      editable={true}
     />
   );
 };
@@ -571,7 +565,7 @@ function splitAtMidnight(ev: EventInput): EventInput[] {
   while (from < end) {
     const mid = nextMidnight(from);
     const to = mid < end ? mid : end;
-    out.push({ ...ev, id: `${ev.id}#${i++}`, start: from, end: to });
+    out.push({ ...ev, id: `${ev.id}#${i++}`, start: from, end: to, editable: false });
     from = mid;
   }
   return out;

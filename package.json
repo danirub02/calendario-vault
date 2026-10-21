@@ -1,6 +1,6 @@
 {
   "name": "calendario-vault",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Vista calendario per Bases (mese, settimana, giorno), calendari Google e form «Nuovo evento». Fork di Calendar Bases di Edrick Leong (MIT).",
   "main": "main.js",
   "scripts": {

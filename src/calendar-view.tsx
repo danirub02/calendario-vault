@@ -13,6 +13,7 @@ import React, { StrictMode } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { CalendarHandle, CalendarReactView } from "./CalendarReactView";
 import { AppContext } from "./context";
+import { DropPos, dropToFields } from "./date-utils";
 import { EditGoogleEventModal } from "./google-modal";
 import {
   clearGoogleCache,
@@ -179,10 +180,8 @@ export class CalendarView extends BasesView {
               evt.preventDefault();
               this.showEntryContextMenu(evt.nativeEvent, entry);
             }}
-            onEventDrop={(entry, newStart, newEnd) =>
-              this.updateEntryDates(entry, newStart, newEnd)
-            }
-            editable={this.isEditable()}
+            onEventDrop={(entry, drop) => this.updateEntryDates(entry, drop)}
+            lockedFolder={this.plugin.settings.reminders.enabled ? this.plugin.settings.reminders.remFolder : undefined}
             calendarHandleRef={this.calendarHandleRef}
           />
         </AppContext.Provider>
@@ -244,18 +243,6 @@ export class CalendarView extends BasesView {
     modal.open();
   }
 
-  private isEditable(): boolean {
-    if (!this.startDateProp) return false;
-    const startDateProperty = parsePropertyId(this.startDateProp);
-    if (startDateProperty.type !== "note") return false;
-
-    if (!this.endDateProp) return true;
-    const endDateProperty = parsePropertyId(this.endDateProp);
-    if (endDateProperty.type !== "note") return false;
-
-    return true;
-  }
-
   private extractDate(entry: BasesEntry, propId: BasesPropertyId): Date | null {
     try {
       const value = entry.getValue(propId);
@@ -289,45 +276,39 @@ export class CalendarView extends BasesView {
     );
   }
 
-  private async updateEntryDates(
-    entry: BasesEntry,
-    newStart: Date,
-    newEnd?: Date,
-  ): Promise<void> {
-    if (!this.startDateProp) return;
+  // Scrive la nuova posizione nel frontmatter. Con le note del vault (`date`, `endDate`, `startTime`,
+  // `endTime`) funziona anche se la vista usa formule; altrimenti riscrive le proprietà `note.` configurate.
+  private async updateEntryDates(entry: BasesEntry, drop: DropPos): Promise<void> {
+    const f = dropToFields(drop);
+    const startProp = this.startDateProp?.startsWith("note.") ? this.startDateProp.slice(5) : null;
+    const endProp = this.endDateProp?.startsWith("note.") ? this.endDateProp.slice(5) : null;
 
-    const file = entry.file;
-    const startPropName = this.startDateProp;
-    const endPropName = this.endDateProp;
-
-    const extractedStartProp = startPropName.startsWith("note.")
-      ? startPropName.slice(5)
-      : null;
-
-    const extractedEndProp = endPropName?.startsWith("note.")
-      ? endPropName.slice(5)
-      : null;
-
-    const shouldUpdate =
-      extractedStartProp !== null &&
-      (!this.endDateProp || extractedEndProp !== null);
-
-    if (!shouldUpdate) {
-      return;
-    }
-
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
-      const formatDate = (date: Date): string => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const day = String(date.getDate()).padStart(2, "0");
-        return `${year}-${month}-${day}`;
-      };
-
-      frontmatter[extractedStartProp] = formatDate(newStart);
-      if (this.endDateProp && newEnd && extractedEndProp) {
-        frontmatter[extractedEndProp] = formatDate(newEnd);
+    await this.app.fileManager.processFrontMatter(entry.file, (fm) => {
+      if (fm.date !== undefined) {
+        fm.date = f.date;
+        if (f.endDate) fm.endDate = f.endDate;
+        else delete fm.endDate;
+        if (f.allDay) {
+          delete fm.startTime;
+          delete fm.endTime;
+        } else {
+          fm.startTime = f.startTime;
+          fm.endTime = f.endTime;
+        }
+        fm.allDay = f.allDay;
+        // Proprietà «A to B» importata da Notion
+        const key = ["Date", "Data"].find((k) => k in fm);
+        if (key)
+          fm[key] = f.allDay
+            ? f.endDate
+              ? `${f.date} to ${f.endDate}`
+              : f.date
+            : `${f.date}T${f.startTime}:00 to ${f.endDate || f.date}T${f.endTime}:00`;
+        return;
       }
+      if (!startProp || (this.endDateProp && !endProp)) throw new Error("proprietà data non modificabile");
+      fm[startProp] = f.date;
+      if (endProp) fm[endProp] = f.endDate || f.date;
     });
   }
 
