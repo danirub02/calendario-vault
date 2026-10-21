@@ -1,8 +1,51 @@
 import { Plugin } from "obsidian";
 import { CalendarView, CalendarViewType } from "./calendar-view";
+import { clearGoogleCache, createGoogleEvent, GoogleEventForm, GoogleCalendarRef } from "./google";
+import { EventModal } from "./nuovo-evento";
+import { ReminderSync } from "./promemoria";
+import { CalendarioSettings, CalendarioSettingTab, DEFAULT_SETTINGS } from "./settings";
 
 export default class ObsidianCalendarPlugin extends Plugin {
-  onload() {
+  settings: CalendarioSettings = DEFAULT_SETTINGS;
+  // Viste calendario aperte: servono per ricaricare gli eventi Google dopo una scrittura
+  views = new Set<CalendarView>();
+
+  refreshViews() {
+    this.views.forEach((v) => v.refetchExternal());
+  }
+
+  async loadSettings() {
+    const data = (await this.loadData()) as Partial<CalendarioSettings> | null;
+    this.settings = {
+      calendars: data?.calendars ?? [],
+      google: { ...DEFAULT_SETTINGS.google, ...(data?.google ?? {}) },
+    };
+    this.settings.google.accounts = data?.google?.accounts ?? [];
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+
+  googleCalendars(): GoogleCalendarRef[] {
+    return this.settings.calendars.filter((c): c is GoogleCalendarRef => c.type === "google" && c.enabled);
+  }
+
+  async createGoogleEvent(cal: GoogleCalendarRef, form: GoogleEventForm) {
+    await createGoogleEvent({ google: this.settings.google, save: () => this.saveSettings() }, cal, form);
+    this.refreshViews();
+    // Google a volte restituisce la lista con qualche secondo di ritardo
+    window.setTimeout(() => {
+      clearGoogleCache();
+      this.refreshViews();
+    }, 2500);
+  }
+
+  private reminders = new ReminderSync(this);
+
+  async onload() {
+    await this.loadSettings();
+    this.addSettingTab(new CalendarioSettingTab(this.app, this));
     // Register "bases" as a hover source that doesn't require CMD/CTRL
     // so Page Preview shows on regular hover over calendar events
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -11,16 +54,22 @@ export default class ObsidianCalendarPlugin extends Plugin {
       defaultMod: false,
     };
 
+    const openForm = () => new EventModal(this.app, this).open();
+    this.addCommand({ id: "nuovo-evento", name: "Crea nuovo evento", callback: openForm });
+    this.addRibbonIcon("calendar-plus", "Nuovo evento", openForm);
+    this.reminders.register();
+
     this.registerBasesView(CalendarViewType, {
       name: "Calendar",
       icon: "lucide-calendar",
       factory: (controller, containerEl) =>
-        new CalendarView(controller, containerEl),
+        new CalendarView(controller, containerEl, this),
       options: () => CalendarView.getViewOptions(),
     });
   }
 
   onunload() {
+    this.reminders.unload();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (this.app.workspace as any).hoverLinkSources["bases"];
   }

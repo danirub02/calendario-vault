@@ -1,24 +1,43 @@
 import type {
   EventApi,
+  EventInput,
   EventClickArg,
   EventContentArg,
   EventDropArg,
 } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import FullCalendar from "@fullcalendar/react";
 import { BasesEntry, BasesPropertyId, DateValue, Value } from "obsidian";
 import React, { useCallback, useEffect, useRef } from "react";
 
 import { useApp } from "./hooks";
+import { ExternalCalendar, loadExternalEvents } from "./external";
+import type { GoogleCtx, GoogleEventRef } from "./google";
 
 export interface CalendarHandle {
   updateSize(): void;
+  refetch(): void;
 }
 
 interface CalendarReactViewProps {
   entries: CalendarEntry[];
   weekStartDay: number;
+  viewType: string;
+  colorProperty: BasesPropertyId | null;
+  colorMap: string;
+  externalCalendars: ExternalCalendar[];
+  googleCtx: GoogleCtx;
+  onExternalClick: (info: {
+    htmlLink?: string;
+    google?: GoogleEventRef;
+    title: string;
+    calName: string;
+    when: string;
+    location: string;
+    description: string;
+  }) => void;
   properties: BasesPropertyId[];
   onEntryClick: (entry: BasesEntry, isModEvent: boolean) => void;
   onEntryContextMenu: (evt: React.MouseEvent, entry: BasesEntry) => void;
@@ -34,6 +53,12 @@ interface CalendarReactViewProps {
 export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
   entries,
   weekStartDay,
+  viewType,
+  colorProperty,
+  colorMap,
+  externalCalendars,
+  googleCtx,
+  onExternalClick,
   properties,
   onEntryClick,
   onEntryContextMenu,
@@ -53,6 +78,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
     if (calendarHandleRef) {
       (calendarHandleRef as React.RefObject<CalendarHandle | null>).current = {
         updateSize: () => calendarRef.current?.getApi().updateSize(),
+        refetch: () => calendarRef.current?.getApi().refetchEvents(),
       };
     }
     return () => {
@@ -62,7 +88,50 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
     };
   }, [calendarHandleRef]);
 
+  const hasTime = (d?: Date) =>
+    !!d && (d.getHours() !== 0 || d.getMinutes() !== 0 || d.getSeconds() !== 0);
+
+  const colors = parseColorMap(colorMap);
+  const colorFor = (entry: BasesEntry): Record<string, string> => {
+    if (!colorProperty) return {};
+    const v = tryGetValue(entry, colorProperty);
+    if (!v || !v.isTruthy()) return {};
+    const keys = v
+      .toString()
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean);
+    if (!keys.length) return {};
+    const mapped = keys.map((k) => colors[k]).find(Boolean);
+    const bg = mapped ?? hashColor(keys[0]);
+    return { backgroundColor: bg, borderColor: bg, textColor: contrastText(bg) };
+  };
+
   const events = entries.map((calEntry) => {
+    const color = colorFor(calEntry.entry);
+    const timed = hasTime(calEntry.startDate) || hasTime(calEntry.endDate);
+    if (timed) {
+      // Evento che attraversa la mezzanotte (es. 23:00 → 06:00 senza endDate):
+      // la fine risulta prima dell'inizio, quindi la spostiamo al giorno dopo.
+      let end = calEntry.endDate;
+      if (end && end <= calEntry.startDate) {
+        end = new Date(end);
+        while (end <= calEntry.startDate) end.setDate(end.getDate() + 1);
+      }
+      return {
+        id: calEntry.entry.file.path,
+        title: calEntry.entry.file.basename,
+        start: calEntry.startDate,
+        end,
+        allDay: false,
+        extendedProps: {
+          entry: calEntry.entry,
+          originalEndDate: calEntry.endDate,
+          evColor: color.backgroundColor,
+          evText: color.textColor,
+        },
+      };
+    }
     // FullCalendar treats end dates as exclusive when allDay is true
     // We need to add one day to the end date to make it inclusive
     // But if start and end are the same day, we don't set an end date (single day event)
@@ -96,14 +165,68 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       end: adjustedEndDate,
       allDay: true,
       extendedProps: {
+        evColor: color.backgroundColor,
+        evText: color.textColor,
         entry: calEntry.entry,
         originalEndDate: calEntry.endDate, // Keep track of original end date for drag operations
       },
     };
   });
 
+  const viewTypeRef = useRef(viewType);
+  viewTypeRef.current = viewType;
+  const eventsRef = useRef(events);
+  eventsRef.current = events;
+  const extRef = useRef(externalCalendars);
+  extRef.current = externalCalendars;
+  const ctxRef = useRef(googleCtx);
+  ctxRef.current = googleCtx;
+  const extKey = JSON.stringify(externalCalendars);
+
+  const fetchEvents = useCallback(
+    async (info: { start: Date; end: Date }) => {
+      const ext = extRef.current.length
+        ? await loadExternalEvents(extRef.current, info.start, info.end, ctxRef.current)
+        : [];
+      console.debug(`Calendario Vault: ${ext.length} eventi esterni da ${extRef.current.length} calendari`);
+      // Orario originale (prima dell'eventuale divisione a mezzanotte) per l'etichetta
+      const extWithTime = ext.map((e) => ({
+        ...e,
+        extendedProps: { ...e.extendedProps, origStart: e.start, origEnd: e.end },
+      }));
+      const all = [...eventsRef.current, ...extWithTime];
+      // Nelle viste a giorni (mese / settimana a giorni) un evento con ora che
+      // attraversa la mezzanotte viene diviso in un pezzo per giorno, così ogni
+      // pezzo si ordina per la sua ora e non finisce in cima come un blocco.
+      return viewTypeRef.current === "month" || viewTypeRef.current === "weekdays"
+        ? all.flatMap(splitAtMidnight)
+        : all;
+    },
+    [],
+  );
+
+  useEffect(() => {
+    calendarRef.current?.getApi().refetchEvents();
+  }, [events, extKey]);
+
   const handleEventClick = useCallback(
     (clickInfo: EventClickArg) => {
+      if (clickInfo.event.extendedProps.external) {
+        clickInfo.jsEvent.preventDefault();
+        const ev = clickInfo.event;
+        onExternalClick({
+          title: ev.title,
+          calName: ev.extendedProps.calName as string,
+          when: ev.allDay
+            ? ev.start?.toLocaleDateString() ?? ""
+            : `${ev.start?.toLocaleString() ?? ""}${ev.end ? " – " + ev.end.toLocaleTimeString() : ""}`,
+          location: ev.extendedProps.location as string,
+          description: ev.extendedProps.description as string,
+          htmlLink: ev.extendedProps.htmlLink as string | undefined,
+          google: ev.extendedProps.google as GoogleEventRef | undefined,
+        });
+        return;
+      }
       const target = clickInfo.jsEvent.target as HTMLElement;
       const entry = clickInfo.event.extendedProps.entry as BasesEntry;
       const isModEvent = clickInfo.jsEvent.ctrlKey || clickInfo.jsEvent.metaKey;
@@ -130,7 +253,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       clickInfo.jsEvent.preventDefault();
       onEntryClick(entry, isModEvent);
     },
-    [app, onEntryClick],
+    [app, onEntryClick, onExternalClick],
   );
 
   // Track contextmenu listeners per element to prevent duplicates across hover cycles
@@ -138,6 +261,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
 
   const handleEventMouseEnter = useCallback(
     (mouseEnterInfo: { event: EventApi; el: HTMLElement; jsEvent: MouseEvent }) => {
+      if (mouseEnterInfo.event.extendedProps.external) return;
       const entry = mouseEnterInfo.event.extendedProps.entry as BasesEntry;
       const el = mouseEnterInfo.el;
 
@@ -275,6 +399,27 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
     (eventInfo: EventContentArg) => {
       if (!app) return null;
 
+      if (eventInfo.event.extendedProps.external) {
+        const p = eventInfo.event.extendedProps;
+        const hm = (v: unknown) =>
+          v
+            ? new Date(v as string | Date).toLocaleTimeString("it-IT", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              })
+            : "";
+        const time = eventInfo.event.allDay
+          ? ""
+          : [hm(p.origStart), hm(p.origEnd)].filter(Boolean).join(" – ");
+        return (
+          <div className="bases-calendar-event-content">
+            <div className="bases-calendar-event-title">{eventInfo.event.title}</div>
+            {time && <div className="bases-calendar-event-properties">{time}</div>}
+          </div>
+        );
+      }
+
       const entry = eventInfo.event.extendedProps.entry as BasesEntry;
       const validProperties: { propertyId: BasesPropertyId; value: Value }[] =
         [];
@@ -324,8 +469,24 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
   return (
     <FullCalendar
       ref={calendarRef}
-      plugins={[dayGridPlugin, interactionPlugin]}
-      initialView="dayGridMonth"
+      key={viewType}
+      plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+      initialView={
+        viewType === "week"
+          ? "timeGridWeek"
+          : viewType === "weekdays"
+            ? "dayGridWeek"
+            : viewType === "day"
+              ? "timeGridDay"
+              : "dayGridMonth"
+      }
+      scrollTime="07:00:00"
+      eventOrder="-allDay,start,-duration,title"
+      nowIndicator={true}
+      allDaySlot={true}
+      slotEventOverlap={false}
+      slotLabelFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
+      eventTimeFormat={{ hour: "2-digit", minute: "2-digit", hour12: false }}
       firstDay={weekStartDay}
       headerToolbar={{
         left: "",
@@ -333,16 +494,23 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
         right: "prev,today,next",
       }}
       buttonText={{
-        today: "Today",
+        today: "Oggi",
       }}
+      allDayText="Tutto il giorno"
       navLinks={false}
-      events={events}
+      events={fetchEvents}
+      eventDidMount={(info) => {
+        const bg = info.event.extendedProps.evColor as string | undefined;
+        const fg = info.event.extendedProps.evText as string | undefined;
+        if (bg) info.el.style.setProperty("--ev-bg", bg);
+        if (fg) info.el.style.setProperty("--ev-fg", fg);
+      }}
       eventContent={renderEventContent}
       eventClick={handleEventClick}
       eventMouseEnter={handleEventMouseEnter}
       eventDrop={(info) => void handleEventDrop(info)}
       height="auto"
-      fixedWeekCount={true}
+      fixedWeekCount={viewType === "month"}
       fixedMirrorParent={document.body ?? undefined}
       eventDurationEditable={false}
       editable={editable}
@@ -362,4 +530,49 @@ function tryGetValue(entry: BasesEntry, propId: BasesPropertyId): Value | null {
   } catch {
     return null;
   }
+}
+
+function parseColorMap(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of (text || "").split(/[,;\n]/)) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    const k = part.slice(0, i).trim().toLowerCase();
+    const c = part.slice(i + 1).trim();
+    if (k && c) out[k] = c;
+  }
+  return out;
+}
+
+function hashColor(key: string): string {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return `hsl(${h % 360}, 55%, 45%)`;
+}
+
+function contrastText(color: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(color.trim());
+  if (!m) return "#ffffff";
+  const n = parseInt(m[1], 16);
+  const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+  return lum > 0.6 ? "#1a1a1a" : "#ffffff";
+}
+
+function splitAtMidnight(ev: EventInput): EventInput[] {
+  if (ev.allDay || !ev.start || !ev.end) return [ev];
+  const start = new Date(ev.start as string | Date);
+  const end = new Date(ev.end as string | Date);
+  const nextMidnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+  if (!(end > start) || end <= nextMidnight(start)) return [ev];
+
+  const out: EventInput[] = [];
+  let from = start;
+  let i = 0;
+  while (from < end) {
+    const mid = nextMidnight(from);
+    const to = mid < end ? mid : end;
+    out.push({ ...ev, id: `${ev.id}#${i++}`, start: from, end: to });
+    from = mid;
+  }
+  return out;
 }

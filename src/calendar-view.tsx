@@ -5,6 +5,7 @@ import {
   BasesView,
   DateValue,
   Menu,
+  Modal,
   parsePropertyId,
   QueryController,
 } from "obsidian";
@@ -12,6 +13,15 @@ import React, { StrictMode } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { CalendarHandle, CalendarReactView } from "./CalendarReactView";
 import { AppContext } from "./context";
+import { EditGoogleEventModal } from "./google-modal";
+import {
+  clearGoogleCache,
+  deleteGoogleEvent,
+  formFromGoogle,
+  GoogleEventRef,
+  updateGoogleEvent,
+} from "./google";
+import type ObsidianCalendarPlugin from "./main";
 
 export const CalendarViewType = "calendar";
 
@@ -33,8 +43,17 @@ export class CalendarView extends BasesView {
   private startDateProp: BasesPropertyId | null = null;
   private endDateProp: BasesPropertyId | null = null;
   private weekStartDay: number = 1;
+  private viewType: string = "month";
+  private colorProp: BasesPropertyId | null = null;
+  private colorMap: string = "";
+  private showExternal: boolean = false;
+  private externalFilter: string = "";
 
-  constructor(controller: QueryController, scrollEl: HTMLElement) {
+  constructor(
+    controller: QueryController,
+    scrollEl: HTMLElement,
+    private plugin: ObsidianCalendarPlugin,
+  ) {
     super(controller);
     this.scrollEl = scrollEl;
     this.containerEl = scrollEl.createDiv({
@@ -44,10 +63,15 @@ export class CalendarView extends BasesView {
   }
 
   onload(): void {
-    // React components will handle their own lifecycle
+    this.plugin.views.add(this);
+  }
+
+  refetchExternal(): void {
+    this.calendarHandleRef.current?.refetch();
   }
 
   onunload() {
+    this.plugin.views.delete(this);
     if (this.root) {
       this.root.unmount();
       this.root = null;
@@ -73,6 +97,11 @@ export class CalendarView extends BasesView {
   private loadConfig(): void {
     this.startDateProp = this.config.getAsPropertyId("startDate");
     this.endDateProp = this.config.getAsPropertyId("endDate");
+    this.colorProp = this.config.getAsPropertyId("colorProperty");
+    this.colorMap = (this.config.get("colorMap") as string) || "";
+    this.showExternal = this.config.get("showExternal") === true;
+    this.externalFilter = ((this.config.get("externalFilter") as string) || "").trim();
+    this.viewType = (this.config.get("viewType") as string) || "month";
     const weekStartDayValue = this.config.get("weekStartDay") as string;
 
     const dayNameToNumber: Record<string, number> = {
@@ -129,6 +158,15 @@ export class CalendarView extends BasesView {
           <CalendarReactView
             entries={this.entries}
             weekStartDay={this.weekStartDay}
+            viewType={this.viewType}
+            colorProperty={this.colorProp}
+            colorMap={this.colorMap}
+            externalCalendars={this.externalCalendars()}
+            googleCtx={{
+              google: this.plugin.settings.google,
+              save: () => this.plugin.saveSettings(),
+            }}
+            onExternalClick={(info) => this.showExternalDetails(info)}
             properties={this.config.getOrder() || []}
             onEntryClick={(entry, isModEvent) => {
               void this.app.workspace.openLinkText(
@@ -150,6 +188,60 @@ export class CalendarView extends BasesView {
         </AppContext.Provider>
       </StrictMode>,
     );
+  }
+
+  private externalCalendars() {
+    if (!this.showExternal) return [];
+    const names = this.externalFilter
+      .split(",")
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean);
+    return this.plugin.settings.calendars.filter(
+      (c) => !names.length || names.includes(c.name.toLowerCase()),
+    );
+  }
+
+  private showExternalDetails(info: {
+    title: string;
+    calName: string;
+    when: string;
+    location: string;
+    description: string;
+    htmlLink?: string;
+    google?: GoogleEventRef;
+  }): void {
+    const modal = new Modal(this.app);
+    modal.titleEl.setText(info.title);
+    modal.contentEl.createEl("p", { text: `${info.calName} · ${info.when}` });
+    if (info.location) modal.contentEl.createEl("p", { text: `📍 ${info.location}` });
+    if (info.description) modal.contentEl.createEl("p", { text: info.description });
+    if (info.htmlLink) {
+      modal.contentEl.createEl("a", { text: "Apri in Google Calendar", href: info.htmlLink });
+    }
+    const ref = info.google;
+    if (ref) {
+      const ctx = { google: this.plugin.settings.google, save: () => this.plugin.saveSettings() };
+      const row = modal.contentEl.createDiv({ cls: "modal-button-container" });
+      row.createEl("button", { text: "Modifica", cls: "mod-cta" }).onclick = () => {
+        modal.close();
+        new EditGoogleEventModal(
+          this.app,
+          formFromGoogle(ref, { location: info.location, description: info.description }),
+          ref.recurring,
+          async (f) => {
+            await updateGoogleEvent(ctx, ref, f);
+            this.plugin.refreshViews();
+            window.setTimeout(() => { clearGoogleCache(); this.plugin.refreshViews(); }, 2500);
+          },
+          async () => {
+            await deleteGoogleEvent(ctx, ref);
+            this.plugin.refreshViews();
+            window.setTimeout(() => { clearGoogleCache(); this.plugin.refreshViews(); }, 2500);
+          },
+        ).open();
+      };
+    }
+    modal.open();
   }
 
   private isEditable(): boolean {
@@ -268,9 +360,57 @@ export class CalendarView extends BasesView {
         ],
       },
       {
+        displayName: "External calendars",
+        type: "group",
+        items: [
+          {
+            displayName: "Show external calendars (Google)",
+            type: "toggle",
+            key: "showExternal",
+            default: false,
+          },
+          {
+            displayName: "Only these (names, comma separated; empty = all)",
+            type: "text",
+            key: "externalFilter",
+            placeholder: "General, Università",
+          },
+        ],
+      },
+      {
+        displayName: "Colors",
+        type: "group",
+        items: [
+          {
+            displayName: "Color by property",
+            type: "property",
+            key: "colorProperty",
+            placeholder: "Property (e.g. tags)",
+          },
+          {
+            displayName: "Colors (value=#hex, comma separated)",
+            type: "text",
+            key: "colorMap",
+            placeholder: "ballo=#7c0909, palestra=#32b620",
+          },
+        ],
+      },
+      {
         displayName: "Calendar options",
         type: "group",
         items: [
+          {
+            displayName: "View",
+            type: "dropdown",
+            key: "viewType",
+            default: "month",
+            options: {
+              month: "Month",
+              week: "Week (hours)",
+              weekdays: "Week (days only)",
+              day: "Day (hours)",
+            },
+          },
           {
             displayName: "Week starts on",
             type: "dropdown",

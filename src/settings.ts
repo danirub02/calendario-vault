@@ -1,0 +1,202 @@
+import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { clearExternalCache, ExternalCalendar } from "./external";
+import {
+  buildAuthUrl,
+  clearGoogleCache,
+  completeLogin,
+  GoogleConfig,
+  listCalendars,
+  PendingAuth,
+  REDIRECT_URI,
+} from "./google";
+
+export interface CalendarioSettings {
+  calendars: ExternalCalendar[];
+  google: GoogleConfig;
+}
+
+export const DEFAULT_SETTINGS: CalendarioSettings = {
+  calendars: [],
+  google: { clientId: "", clientSecret: "", accounts: [] },
+};
+
+interface Host extends Plugin {
+  settings: CalendarioSettings;
+  saveSettings(): Promise<void>;
+}
+
+export class CalendarioSettingTab extends PluginSettingTab {
+  private pending: PendingAuth | null = null;
+  private pastedUrl = "";
+
+  constructor(
+    app: App,
+    private plugin: Host,
+  ) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+    const s = this.plugin.settings;
+    const g = s.google;
+
+    containerEl.createEl("h2", { text: "Account Google" });
+    const help = containerEl.createEl("details");
+    help.createEl("summary", { text: "Come ottenere Client ID e Secret (una volta sola)" });
+    const ol = help.createEl("ol");
+    [
+      "console.cloud.google.com → crea un progetto.",
+      "API e servizi → Libreria → abilita «Google Calendar API».",
+      "Schermata consenso OAuth → tipo «Esterno» → compila nome e email. Poi «Pubblica app» (stato «In produzione»): in «Test» il login scade dopo 7 giorni.",
+      `Credenziali → Crea credenziali → ID client OAuth → tipo «App desktop». Copia Client ID e Client secret qui sotto.`,
+      `Il login finisce su ${REDIRECT_URI} (pagina che non si carica: è normale). Copia l'intero URL dalla barra degli indirizzi e incollalo qui sotto.`,
+      "Google mostrerà «app non verificata»: Avanzate → Vai a … (è la tua app).",
+    ].forEach((t) => ol.createEl("li", { text: t }));
+
+    new Setting(containerEl).setName("Client ID").addText((t) =>
+      t.setValue(g.clientId).onChange(async (v) => {
+        g.clientId = v.trim();
+        await this.plugin.saveSettings();
+      }),
+    );
+    new Setting(containerEl).setName("Client secret").addText((t) => {
+      t.inputEl.type = "password";
+      t.setValue(g.clientSecret).onChange(async (v) => {
+        g.clientSecret = v.trim();
+        await this.plugin.saveSettings();
+      });
+    });
+
+    new Setting(containerEl)
+      .setName("Accedi con Google")
+      .setDesc("Apre il browser. Dopo il consenso copia l'URL della pagina finale e incollalo sotto.")
+      .addButton((b) =>
+        b.setButtonText("Apri login").setCta().onClick(async () => {
+          if (!g.clientId || !g.clientSecret) return new Notice("Inserisci Client ID e Client secret");
+          const { url, pending } = await buildAuthUrl(g);
+          this.pending = pending;
+          window.open(url);
+        }),
+      );
+    new Setting(containerEl)
+      .setName("URL di ritorno")
+      .addText((t) => {
+        t.setPlaceholder(`${REDIRECT_URI}/?state=...&code=...`).onChange((v) => (this.pastedUrl = v));
+      })
+      .addButton((b) =>
+        b.setButtonText("Conferma").onClick(async () => {
+          if (!this.pending) return new Notice("Prima premi «Apri login»");
+          try {
+            const acc = await completeLogin(g, this.pending, this.pastedUrl);
+            const i = g.accounts.findIndex((a) => a.email === acc.email);
+            if (i >= 0) g.accounts[i] = { ...acc, refreshToken: acc.refreshToken || g.accounts[i].refreshToken };
+            else g.accounts.push(acc);
+            this.pending = null;
+            await this.plugin.saveSettings();
+            new Notice(`Collegato: ${acc.email}`);
+            this.display();
+          } catch (e) {
+            new Notice(`Login fallito: ${(e as Error).message}`, 8000);
+          }
+        }),
+      );
+
+    g.accounts.forEach((acc) => {
+      new Setting(containerEl)
+        .setName(acc.email)
+        .addButton((b) =>
+          b.setButtonText("Importa calendari").onClick(async () => {
+            try {
+              const list = await listCalendars({ google: g, save: () => this.plugin.saveSettings() }, acc.email);
+              let added = 0;
+              for (const c of list) {
+                const exists = s.calendars.some(
+                  (x) => x.type === "google" && x.account === acc.email && x.calendarId === c.id,
+                );
+                if (exists) continue;
+                s.calendars.push({
+                  type: "google",
+                  name: c.summary,
+                  color: c.color,
+                  enabled: true,
+                  account: acc.email,
+                  calendarId: c.id,
+                });
+                added++;
+              }
+              await this.plugin.saveSettings();
+              new Notice(`Aggiunti ${added} calendari`);
+              this.display();
+            } catch (e) {
+              new Notice(`Errore: ${(e as Error).message}`, 8000);
+            }
+          }),
+        )
+        .addExtraButton((b) =>
+          b.setIcon("trash").setTooltip("Scollega account").onClick(async () => {
+            g.accounts = g.accounts.filter((a) => a.email !== acc.email);
+            s.calendars = s.calendars.filter((c) => !(c.type === "google" && c.account === acc.email));
+            await this.plugin.saveSettings();
+            this.display();
+          }),
+        );
+    });
+
+    containerEl.createEl("h2", { text: "Calendari esterni" });
+    s.calendars.forEach((cal, i) => {
+      const row = new Setting(containerEl).addText((t) =>
+        t.setPlaceholder("Nome").setValue(cal.name).onChange(async (v) => {
+          cal.name = v.trim();
+          await this.plugin.saveSettings();
+        }),
+      );
+      if (cal.type === "google") row.setDesc(`Google · ${cal.account}`);
+      else
+        row.addText((t) => {
+          t.inputEl.type = "password";
+          t.setPlaceholder("URL iCal segreto").setValue(cal.url).onChange(async (v) => {
+            cal.url = v.trim();
+            await this.plugin.saveSettings();
+          });
+        });
+      row
+        .addColorPicker((c) =>
+          c.setValue(cal.color).onChange(async (v) => {
+            cal.color = v;
+            await this.plugin.saveSettings();
+          }),
+        )
+        .addToggle((t) =>
+          t.setValue(cal.enabled).onChange(async (v) => {
+            cal.enabled = v;
+            await this.plugin.saveSettings();
+          }),
+        )
+        .addExtraButton((b) =>
+          b.setIcon("trash").setTooltip("Elimina").onClick(async () => {
+            s.calendars.splice(i, 1);
+            await this.plugin.saveSettings();
+            this.display();
+          }),
+        );
+    });
+
+    new Setting(containerEl)
+      .addButton((b) =>
+        b.setButtonText("Aggiungi calendario iCal").onClick(async () => {
+          s.calendars.push({ type: "ics", name: `iCal ${s.calendars.length + 1}`, url: "", color: "#4285f4", enabled: true });
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      )
+      .addButton((b) =>
+        b.setButtonText("Svuota cache").onClick(() => {
+          clearExternalCache();
+          clearGoogleCache();
+          new Notice("Cache svuotata: riapri la vista per ricaricare");
+        }),
+      );
+  }
+}

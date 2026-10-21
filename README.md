@@ -1,57 +1,42 @@
-## Calendar Bases
+## Calendario Vault
 
-<a href='https://ko-fi.com/W7W71T4JPP' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi5.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
+Vista calendario per [Obsidian Bases](https://help.obsidian.md/bases), con calendari Google e form per creare eventi.
+Fork di [Calendar Bases](https://github.com/edrickleong/obsidian-calendar-bases) di Edrick Leong (MIT), basato su [FullCalendar](https://github.com/fullcalendar/fullcalendar).
 
 ![](./screenshot.png)
 
-Adds a calendar layout to [Obsidian Bases](https://help.obsidian.md/bases) so you can display notes with dates in an interactive calendar view.
+### Funzioni
 
-Built with [FullCalendar](https://github.com/fullcalendar/fullcalendar) for a robust and feature-rich calendar experience.
+- Vista Bases «Calendar»: mese, settimana con ore, settimana a giorni, giorno.
+- Colori per evento (`Color by property` + mappa `valore=#hex`).
+- Eventi con ora nelle fasce orarie; eventi senza ora o multi-giorno (`endDate`) nella riga «Tutto il giorno».
+- Calendari esterni: Google Calendar (login OAuth con un client proprio; lettura, creazione, modifica, eliminazione) o indirizzo iCal segreto.
+- Comando «Crea nuovo evento» (e icona nella barra laterale): sceglie il calendario, crea una nota per occorrenza (con ricorrenze) oppure un evento Google (ricorrenza come RRULE).
+- Comando «Sincronizza promemoria iscrizione esami».
 
-- Dynamically display entries that match your filters on their respective dates.
-- Drag and drop events to reschedule them - automatically updates note frontmatter.
-- Navigate between months with intuitive controls.
-- Support for single-day and multi-day events (with optional end dates).
-- Click entries to open them or use context menus for more options.
+### Da personalizzare
 
-## Installation
+Il form «Nuovo evento» e il sync dei promemoria usano cartelle e `.base` del vault dell'autore (`Ballo`, `Palestra`, `Università/Esami Università`, ...). Sono definiti in `src/nuovo-evento.ts` e `src/promemoria.ts`: modificali per il tuo vault e ricompila.
 
-This plugin requires Obsidian v1.10.0 or later to work.
+### Installazione
 
-### Install via Community Plugins
+Richiede Obsidian 1.10.0 o successivo.
 
-Calendar Bases is available under Community Plugins. It can be found [here](obsidian://show-plugin?id=calendar-bases).
+Con [BRAT](obsidian://show-plugin?id=obsidian42-brat): «Add beta plugin», inserisci l'URL di questo repository, scegli l'ultima versione.
 
-### Install via BRAT
+A mano: scarica `main.js`, `manifest.json`, `styles.css` dall'ultima release in `.obsidian/plugins/calendario-vault/`.
 
-1. Install the [BRAT plugin](obsidian://show-plugin?id=obsidian42-brat) under Community Plugins.
-2. Open BRAT settings and click "Add beta plugin".
-3. Enter the URL of this repository: `https://github.com/edrickleong/obsidian-calendar-bases`.
-4. Under "Select a version", choose the Latest version.
-5. Click "Add plugin".
+### Google Calendar
 
+Servono un progetto Google Cloud con Calendar API abilitata e un client OAuth «Desktop». Inserisci Client ID e secret nelle impostazioni del plugin. Le credenziali restano in `data.json` (non sincronizzarlo e non metterlo in git).
 
-## Documentation
+### Sviluppo
 
-### Date Properties
-
-To display entries on the calendar, configure a start date property in the view configuration menu. The property must contain a valid date string.
-
-```yaml
-# Date property examples
-startDate: 2025-10-15
-startDate: 2025-10-15T10:00:00
-
-# Optional end date for multi-day events
-endDate: 2025-10-18
+```
+npm install
+npm run build
 ```
 
-Any JavaScript-parseable date format is supported. For multi-day events, configure both a start date and an optional end date property.
+## Licenza
 
-## Credits
-
-This plugin uses [FullCalendar](https://github.com/fullcalendar/fullcalendar).
-
-## License
-
-This project is licensed under the MIT License.
+MIT. Copyright di Edrick Leong (Calendar Bases) e di Daniele Rubis.

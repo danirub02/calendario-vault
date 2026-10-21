@@ -290,7 +290,7 @@ body {
   }
 
   .fc-event {
-    background-color: var(--background-secondary) !important;
+    background-color: var(--ev-bg, var(--background-secondary)) !important;
     border: none !important;
     border-radius: 3px !important;
     font-weight: 500 !important;
@@ -316,7 +316,11 @@ body {
   }
 
   .fc-event-title-container {
-    color: var(--text-normal) !important;
+    color: var(--ev-fg, var(--text-normal)) !important;
+  }
+
+  .fc-event .bases-calendar-event-content {
+    color: var(--ev-fg, var(--text-normal));
   }
 }
 
