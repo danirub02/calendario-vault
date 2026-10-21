@@ -1,18 +1,36 @@
 import { normalizePath, Notice, Plugin, TFile, TFolder } from "obsidian";
 import { addStep, fmt, parse } from "./date-utils";
 
-// Promemoria automatici: per ogni prova in SRC_FOLDER crea una nota in REM_FOLDER REM_DAYS giorni prima
-// (13: l'iscrizione apre 15 giorni prima, e il giorno dopo è sicuramente già aperta).
-const SRC_FOLDER = "Università/Esami Università";
-const REM_FOLDER = "Università/Iscrizioni Esami";
-const REM_PREFIX = "Iscrizione - ";
-const REM_DAYS = 13;
+export interface ReminderSettings {
+  enabled: boolean;
+  srcFolder: string;
+  remFolder: string;
+  prefix: string;
+  days: number;
+}
+
+// Per ogni prova in srcFolder crea una nota in remFolder `days` giorni prima.
+export const DEFAULT_REMINDERS: ReminderSettings = {
+  enabled: false,
+  srcFolder: "Esami",
+  remFolder: "Iscrizioni Esami",
+  prefix: "Iscrizione - ",
+  days: 13,
+};
+
+interface Host extends Plugin {
+  settings: { reminders: ReminderSettings };
+}
 
 export class ReminderSync {
   private syncTimer: number | undefined;
   private syncing = false;
 
-  constructor(private plugin: Plugin) {}
+  constructor(private plugin: Host) {}
+
+  private get cfg() {
+    return this.plugin.settings.reminders;
+  }
 
   register() {
     const { plugin } = this;
@@ -22,7 +40,7 @@ export class ReminderSync {
       name: "Sincronizza promemoria iscrizione esami",
       callback: () => void this.sync(true),
     });
-    const inSrc = (path: string) => path.startsWith(SRC_FOLDER + "/");
+    const inSrc = (path: string) => path.startsWith(this.cfg.srcFolder + "/");
     const trigger = (f: { path: string }) => {
       if (inSrc(f.path)) this.schedule();
     };
@@ -49,9 +67,10 @@ export class ReminderSync {
   // Allinea REM_FOLDER a SRC_FOLDER: crea/aggiorna i promemoria, elimina quelli orfani.
   // Nome file deterministico, così due dispositivi non creano doppioni.
   private async sync(manual: boolean) {
-    if (this.syncing) return;
+    if (this.syncing || !this.cfg.enabled) return;
     this.syncing = true;
     try {
+      const { srcFolder: SRC_FOLDER, remFolder: REM_FOLDER, prefix: REM_PREFIX, days: REM_DAYS } = this.cfg;
       const { vault, metadataCache, fileManager } = this.plugin.app;
       const today = fmt(new Date());
       const want = new Map<string, { body: string; rem: string; exam: string }>();

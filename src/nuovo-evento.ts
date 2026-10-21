@@ -2,32 +2,16 @@ import { App, Modal, normalizePath, Notice, Setting } from "obsidian";
 import { addStep, fmt, parse, RepeatUnit } from "./date-utils";
 import { GoogleCalendarRef, GoogleEventForm } from "./google";
 
-interface NoteCalendar {
+// Calendario basato su note: una nota per occorrenza in `folder`, con il frontmatter del database `base`.
+export interface NoteCalendar {
+  name: string;
   folder: string;
   base: string;
   tag: string;
   dateKey: string;
-  extra?: "palestra";
+  // Aggiunge Priorità e Completato al form e alla nota
+  taskFields?: boolean;
 }
-
-const CALENDARS: Record<string, NoteCalendar> = {
-  Ballo: { folder: "Ballo", base: "Ballo.base", tag: "ballo", dateKey: "Date" },
-  Palestra: { folder: "Palestra", base: "Palestra.base", tag: "palestra", dateKey: "Date", extra: "palestra" },
-  Dentista: { folder: "Dentista", base: "Dentista.base", tag: "dentista", dateKey: "Date" },
-  "Proloco Eventi": { folder: "Proloco/Eventi", base: "Proloco Eventi.base", tag: "proloco", dateKey: "Date" },
-  "Studio Università": {
-    folder: "Studio Università",
-    base: "Studio Università.base",
-    tag: "studio-universita",
-    dateKey: "Data",
-  },
-  "Esami Università": {
-    folder: "Università/Esami Università",
-    base: "Esami Università.base",
-    tag: "esame-universita",
-    dateKey: "Data",
-  },
-};
 
 interface EventDraft {
   calendar: string;
@@ -50,6 +34,7 @@ interface EventDraft {
 
 export interface NuovoEventoHost {
   app: App;
+  noteCalendars(): NoteCalendar[];
   googleCalendars(): GoogleCalendarRef[];
   createGoogleEvent(cal: GoogleCalendarRef, form: GoogleEventForm): Promise<void>;
 }
@@ -65,7 +50,7 @@ function buildNote(cal: NoteCalendar, ev: EventDraft, start: Date, end: Date): s
   if (multi) lines.push(`endDate: ${endD}`);
   if (!ev.allDay) lines.push(`startTime: ${ev.startTime}`, `endTime: ${ev.endTime}`);
   // Proprietà extra di Palestra
-  if (cal.extra === "palestra") {
+  if (cal.taskFields) {
     if (ev.priority) lines.push(`Priorità: ${ev.priority}`);
     lines.push(`Completato: ${ev.completed}`);
   }
@@ -89,7 +74,7 @@ export class EventModal extends Modal {
   ) {
     super(app);
     this.ev = {
-      calendar: "Ballo",
+      calendar: "",
       title: "",
       date: fmt(new Date()),
       endDate: "",
@@ -115,14 +100,22 @@ export class EventModal extends Modal {
     const ev = this.ev;
 
     // Calendari Google collegati nelle impostazioni del plugin
+    const ncals = this.host.noteCalendars();
     const gcals = this.host.googleCalendars();
+    if (!ncals.length && !gcals.length) {
+      contentEl.createEl("p", {
+        text: "Nessun calendario configurato: aggiungine uno nelle impostazioni di Calendario Vault.",
+      });
+      return;
+    }
+    ev.calendar = ncals.length ? "n:0" : "g:0";
     new Setting(contentEl).setName("Calendario").addDropdown((d) => {
-      Object.keys(CALENDARS).forEach((k) => d.addOption(k, k));
+      ncals.forEach((c, i) => d.addOption(`n:${i}`, c.name));
       gcals.forEach((c, i) => d.addOption(`g:${i}`, `Google · ${c.name} (${c.account})`));
       d.setValue(ev.calendar).onChange((v) => {
         ev.calendar = v;
         extraBox.style.display = v.startsWith("g:") ? "" : "none";
-        palBox.style.display = CALENDARS[v]?.extra === "palestra" ? "" : "none";
+        palBox.style.display = this.noteCal()?.taskFields ? "" : "none";
       });
     });
     new Setting(contentEl).setName("Titolo").addText((t) => {
@@ -130,7 +123,7 @@ export class EventModal extends Modal {
       window.setTimeout(() => t.inputEl.focus(), 0);
     });
     const palBox = contentEl.createDiv();
-    palBox.style.display = CALENDARS[ev.calendar].extra === "palestra" ? "" : "none";
+    palBox.style.display = this.noteCal()?.taskFields ? "" : "none";
     new Setting(palBox).setName("Priorità").addDropdown((d) => {
       d.addOption("", "—").addOption("Alta", "Alta").addOption("Media", "Media").addOption("Bassa", "Bassa");
       d.setValue(ev.priority).onChange((v) => (ev.priority = v));
@@ -139,7 +132,7 @@ export class EventModal extends Modal {
       .setName("Completato")
       .addToggle((t) => t.setValue(ev.completed).onChange((v) => (ev.completed = v)));
     const extraBox = contentEl.createDiv();
-    extraBox.style.display = "none";
+    extraBox.style.display = ev.calendar.startsWith("g:") ? "" : "none";
     new Setting(extraBox).setName("Luogo (Google)").addText((t) => t.onChange((v) => (ev.location = v)));
     new Setting(extraBox).setName("Descrizione (Google)").addTextArea((t) => t.onChange((v) => (ev.description = v)));
     new Setting(contentEl).setName("Data").addText((t) => {
@@ -206,6 +199,10 @@ export class EventModal extends Modal {
     new Setting(contentEl).addButton((b) => b.setButtonText("Crea").setCta().onClick(() => void this.submit()));
   }
 
+  private noteCal(): NoteCalendar | undefined {
+    return this.ev.calendar.startsWith("n:") ? this.host.noteCalendars()[parseInt(this.ev.calendar.slice(2))] : undefined;
+  }
+
   private async submit() {
     const ev = this.ev;
     const title = ev.title.trim().replace(/[\\/:*?"<>|#^[\]]/g, "");
@@ -232,7 +229,8 @@ export class EventModal extends Modal {
     }
     if (!starts.length) return new Notice("Nessuna occorrenza");
 
-    const cal = CALENDARS[ev.calendar];
+    const cal = this.noteCal();
+    if (!cal) return new Notice("Calendario non trovato");
     let created = 0;
     for (const s of starts) {
       const e = new Date(s);
@@ -240,7 +238,7 @@ export class EventModal extends Modal {
       await this.app.vault.create(freePath(this.app, cal.folder, title), buildNote(cal, ev, s, e));
       created++;
     }
-    new Notice(`Creati ${created} eventi in ${ev.calendar}`);
+    new Notice(`Creati ${created} eventi in ${cal.name}`);
     this.close();
   }
 

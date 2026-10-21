@@ -1,4 +1,6 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { NoteCalendar } from "./nuovo-evento";
+import { DEFAULT_REMINDERS, ReminderSettings } from "./promemoria";
 import { clearExternalCache, ExternalCalendar } from "./external";
 import {
   buildAuthUrl,
@@ -12,11 +14,15 @@ import {
 
 export interface CalendarioSettings {
   calendars: ExternalCalendar[];
+  noteCalendars: NoteCalendar[];
+  reminders: ReminderSettings;
   google: GoogleConfig;
 }
 
 export const DEFAULT_SETTINGS: CalendarioSettings = {
   calendars: [],
+  noteCalendars: [],
+  reminders: DEFAULT_REMINDERS,
   google: { clientId: "", clientSecret: "", accounts: [] },
 };
 
@@ -198,5 +204,69 @@ export class CalendarioSettingTab extends PluginSettingTab {
           new Notice("Cache svuotata: riapri la vista per ricaricare");
         }),
       );
+
+    containerEl.createEl("h2", { text: "Calendari nota (form «Nuovo evento»)" });
+    containerEl.createEl("p", {
+      text: "Ogni calendario crea una nota per occorrenza nella cartella indicata, con il frontmatter del database (.base).",
+    });
+    const field = (parent: HTMLElement, name: string, get: () => string, set: (v: string) => void) =>
+      new Setting(parent).setName(name).addText((t) =>
+        t.setValue(get()).onChange(async (v) => {
+          set(v.trim());
+          await this.plugin.saveSettings();
+        }),
+      );
+    s.noteCalendars.forEach((nc, i) => {
+      const det = containerEl.createEl("details");
+      det.createEl("summary", { text: nc.name || `Calendario ${i + 1}` });
+      field(det, "Nome", () => nc.name, (v) => (nc.name = v));
+      field(det, "Cartella delle note", () => nc.folder, (v) => (nc.folder = v));
+      field(det, "File .base", () => nc.base, (v) => (nc.base = v));
+      field(det, "Tag", () => nc.tag, (v) => (nc.tag = v));
+      field(det, "Proprietà data", () => nc.dateKey, (v) => (nc.dateKey = v));
+      new Setting(det).setName("Priorità e Completato").addToggle((t) =>
+        t.setValue(!!nc.taskFields).onChange(async (v) => {
+          nc.taskFields = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+      new Setting(det).addButton((b) =>
+        b.setButtonText("Elimina").onClick(async () => {
+          s.noteCalendars.splice(i, 1);
+          await this.plugin.saveSettings();
+          this.display();
+        }),
+      );
+    });
+    new Setting(containerEl).addButton((b) =>
+      b.setButtonText("Aggiungi calendario nota").onClick(async () => {
+        s.noteCalendars.push({ name: `Calendario ${s.noteCalendars.length + 1}`, folder: "", base: "", tag: "", dateKey: "Date" });
+        await this.plugin.saveSettings();
+        this.display();
+      }),
+    );
+
+    containerEl.createEl("h2", { text: "Promemoria iscrizione esami" });
+    const r = s.reminders;
+    new Setting(containerEl)
+      .setName("Attiva promemoria")
+      .setDesc("Per ogni nota nella cartella delle prove crea una nota promemoria con riga Tasks.")
+      .addToggle((t) =>
+        t.setValue(r.enabled).onChange(async (v) => {
+          r.enabled = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+    field(containerEl, "Cartella delle prove", () => r.srcFolder, (v) => (r.srcFolder = v));
+    field(containerEl, "Cartella dei promemoria", () => r.remFolder, (v) => (r.remFolder = v));
+    field(containerEl, "Prefisso del nome file", () => r.prefix, (v) => (r.prefix = v));
+    new Setting(containerEl).setName("Giorni prima della prova").addText((t) => {
+      t.inputEl.type = "number";
+      t.inputEl.min = "1";
+      t.setValue(String(r.days)).onChange(async (v) => {
+        r.days = Math.max(1, parseInt(v) || DEFAULT_REMINDERS.days);
+        await this.plugin.saveSettings();
+      });
+    });
   }
 }

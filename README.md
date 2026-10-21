@@ -14,9 +14,11 @@ Fork di [Calendar Bases](https://github.com/edrickleong/obsidian-calendar-bases)
 - Comando «Crea nuovo evento» (e icona nella barra laterale): sceglie il calendario, crea una nota per occorrenza (con ricorrenze) oppure un evento Google (ricorrenza come RRULE).
 - Comando «Sincronizza promemoria iscrizione esami».
 
-### Da personalizzare
+### Configurazione
 
-Il form «Nuovo evento» e il sync dei promemoria usano cartelle e `.base` del vault dell'autore (`Ballo`, `Palestra`, `Università/Esami Università`, ...). Sono definiti in `src/nuovo-evento.ts` e `src/promemoria.ts`: modificali per il tuo vault e ricompila.
+Nelle impostazioni del plugin:
+- **Calendari nota**: per ogni calendario nome, cartella delle note, file `.base`, tag, proprietà data e opzione Priorità/Completato. Servono al form «Nuovo evento».
+- **Promemoria iscrizione esami**: cartella delle prove, cartella dei promemoria, prefisso, giorni prima. Disattivato di default.
 
 ### Installazione
 

@@ -1,8 +1,8 @@
 import { Plugin } from "obsidian";
 import { CalendarView, CalendarViewType } from "./calendar-view";
 import { clearGoogleCache, createGoogleEvent, GoogleEventForm, GoogleCalendarRef } from "./google";
-import { EventModal } from "./nuovo-evento";
-import { ReminderSync } from "./promemoria";
+import { EventModal, NoteCalendar } from "./nuovo-evento";
+import { DEFAULT_REMINDERS, ReminderSync } from "./promemoria";
 import { CalendarioSettings, CalendarioSettingTab, DEFAULT_SETTINGS } from "./settings";
 
 export default class ObsidianCalendarPlugin extends Plugin {
@@ -18,6 +18,8 @@ export default class ObsidianCalendarPlugin extends Plugin {
     const data = (await this.loadData()) as Partial<CalendarioSettings> | null;
     this.settings = {
       calendars: data?.calendars ?? [],
+      noteCalendars: data?.noteCalendars ?? [],
+      reminders: { ...DEFAULT_REMINDERS, ...(data?.reminders ?? {}) },
       google: { ...DEFAULT_SETTINGS.google, ...(data?.google ?? {}) },
     };
     this.settings.google.accounts = data?.google?.accounts ?? [];
@@ -25,6 +27,10 @@ export default class ObsidianCalendarPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  noteCalendars(): NoteCalendar[] {
+    return this.settings.noteCalendars;
   }
 
   googleCalendars(): GoogleCalendarRef[] {
