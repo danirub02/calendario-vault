@@ -363,6 +363,7 @@ body {
   /* Pulsanti Mese/Settimana/Giorno: FullCalendar li mette in fondo, qui salgono sotto la barra del titolo */
   .fc-header-toolbar {
     order: -2;
+    padding: 4px !important;
   }
 
   .fc-footer-toolbar {
