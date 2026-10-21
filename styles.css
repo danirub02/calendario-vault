@@ -350,10 +350,6 @@ body {
 
 /* Pannello stretto (iPhone): classe `is-narrow` messa dal componente sotto i 600px */
 .bases-calendar-container.is-narrow {
-  .fc-header-toolbar {
-    padding: 4px !important;
-  }
-
   .fc-toolbar-title {
     font-size: 16px !important;
     text-transform: capitalize;
@@ -364,8 +360,14 @@ body {
     font-size: var(--font-ui-small) !important;
   }
 
+  /* Pulsanti Mese/Settimana/Giorno: FullCalendar li mette in fondo, qui salgono sotto la barra del titolo */
+  .fc-header-toolbar {
+    order: -2;
+  }
+
   .fc-footer-toolbar {
-    padding: 6px 4px !important;
+    order: -1;
+    padding: 0 4px 6px !important;
     justify-content: center;
   }
 
