@@ -96,12 +96,16 @@ export async function completeLogin(
   pending: PendingAuth,
   redirectedUrl: string,
 ): Promise<GoogleAccount> {
-  const u = new URL(redirectedUrl.trim());
-  const err = u.searchParams.get("error");
+  // Tollerante: su iPhone la barra di Safari spesso copia l'URL senza «http://» o solo la parte dopo «?»
+  const q = new URLSearchParams(redirectedUrl.trim().replace(/^[^?]*\?/, "").replace(/#.*$/, ""));
+  const err = q.get("error");
   if (err) throw new Error(err);
-  const code = u.searchParams.get("code");
-  if (!code) throw new Error("Nessun code nell'URL incollato");
-  if (u.searchParams.get("state") !== pending.state) throw new Error("State non valido: riprova il login");
+  const code = q.get("code");
+  if (!code)
+    throw new Error(
+      "Nell'URL incollato manca «code=...»: copia l'indirizzo intero della pagina (deve contenere ?state=...&code=...)",
+    );
+  if (q.get("state") !== pending.state) throw new Error("State non valido: riprova il login");
 
   const t = await tokenRequest({
     code,
