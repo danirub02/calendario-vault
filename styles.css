@@ -400,14 +400,24 @@ body {
     padding: 1px 3px;
     font-size: 10px;
     line-height: 1.25;
-    white-space: nowrap;
-    text-overflow: ellipsis;
   }
 
   .bases-calendar-event-title {
     margin-bottom: 0;
+  }
+
+  /* Nelle celle del mese una riga sola; nelle viste a ore il titolo va a capo nello spazio dell'evento */
+  .fc-daygrid-event .bases-calendar-event-content,
+  .fc-daygrid-event .bases-calendar-event-title {
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .fc-timegrid-event .bases-calendar-event-content,
+  .fc-timegrid-event .bases-calendar-event-title {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .fc-timegrid-slot-label,
