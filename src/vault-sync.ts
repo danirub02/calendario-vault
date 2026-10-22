@@ -94,6 +94,7 @@ export class VaultSync {
       name: "Sincronizza note su Google Calendar «Vault»",
       callback: () => void this.sync(true),
     });
+    plugin.addRibbonIcon("refresh-cw", "Sincronizza note su Google Calendar", () => void this.sync(true));
     const inSrc = (path: string) => this.sources().some((s) => path.startsWith(s.folder + "/"));
     const trigger = (f: { path: string }) => {
       if (inSrc(f.path)) this.schedule();
