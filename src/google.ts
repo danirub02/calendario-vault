@@ -168,13 +168,17 @@ export async function api<T>(
 export async function listCalendars(
   ctx: GoogleCtx,
   email: string,
-): Promise<{ id: string; summary: string; color: string }[]> {
-  const j = await api<{ items: { id: string; summary: string; summaryOverride?: string; backgroundColor?: string }[] }>(
+): Promise<{ id: string; summary: string; color: string; owner: boolean }[]> {
+  const j = await api<{
+    items: { id: string; summary: string; summaryOverride?: string; backgroundColor?: string; accessRole?: string }[];
+  }>(
     ctx,
     email,
     "https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader",
   );
-  return j.items.map((c) => ({ id: c.id, summary: c.summaryOverride || c.summary, color: c.backgroundColor ?? "#4285f4" }));
+  return j.items.map((c) => ({ id: c.id, summary: c.summaryOverride || c.summary, color: c.backgroundColor ?? "#4285f4",
+    owner: c.accessRole === "owner",
+  }));
 }
 
 interface GEvent {

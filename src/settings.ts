@@ -292,9 +292,15 @@ export class CalendarioSettingTab extends PluginSettingTab {
           if (!v.account) return new Notice("Scegli prima l'account");
           try {
             const list = await listCalendars({ google: g, save: () => this.plugin.saveSettings() }, v.account);
-            const hit = list.find((c) => c.summary.trim().toLowerCase() === "vault");
-            if (!hit) return new Notice("Nessun calendario chiamato «Vault» su questo account");
-            v.calendarId = hit.id;
+            // Solo calendari di cui sei proprietario: uno condiviso con lo stesso nome riceverebbe i titoli delle note
+            const hits = list.filter((c) => c.owner && c.summary.trim().toLowerCase() === "vault");
+            if (hits.length !== 1)
+              return new Notice(
+                hits.length
+                  ? "Più calendari tuoi chiamati «Vault»: lasciane uno solo"
+                  : "Nessun calendario tuo chiamato «Vault» su questo account",
+              );
+            v.calendarId = hits[0].id;
             await this.plugin.saveSettings();
             this.display();
           } catch (e) {

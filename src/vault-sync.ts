@@ -126,7 +126,7 @@ export class VaultSync {
       };
       const hash = hashString(JSON.stringify(body));
       want.set(await eventId(f.path), {
-        body: { ...body, extendedProperties: { private: { vaultSync: "1", h: hash, path: f.path } } },
+        body: { ...body, extendedProperties: { private: { vaultSync: "1", h: hash } } },
         hash,
       });
     }
