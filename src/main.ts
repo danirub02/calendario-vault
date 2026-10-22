@@ -22,7 +22,7 @@ export default class ObsidianCalendarPlugin extends Plugin {
       noteCalendars: data?.noteCalendars ?? [],
       reminders: { ...DEFAULT_REMINDERS, ...(data?.reminders ?? {}) },
       google: { ...DEFAULT_SETTINGS.google, ...(data?.google ?? {}) },
-      vaultSync: { ...DEFAULT_SETTINGS.vaultSync, ...(data?.vaultSync ?? {}) },
+      vaultSync: { ...DEFAULT_SETTINGS.vaultSync, ...(data?.vaultSync ?? {}), map: data?.vaultSync?.map ?? {} },
     };
     this.settings.google.accounts = data?.google?.accounts ?? [];
   }
@@ -36,10 +36,10 @@ export default class ObsidianCalendarPlugin extends Plugin {
   }
 
   googleCalendars(): GoogleCalendarRef[] {
-    // Il calendario «Vault» è una copia delle note: mostrarlo darebbe doppioni
-    const vault = this.settings.vaultSync.calendarId;
+    // I calendari sincronizzati dalle note sono una copia: mostrarli darebbe doppioni
+    const mirrored = Object.values(this.settings.vaultSync.map);
     return this.settings.calendars.filter(
-      (c): c is GoogleCalendarRef => c.type === "google" && c.enabled && c.calendarId !== vault,
+      (c): c is GoogleCalendarRef => c.type === "google" && c.enabled && !mirrored.includes(c.calendarId),
     );
   }
 

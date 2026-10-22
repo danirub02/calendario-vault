@@ -7,7 +7,8 @@ import type { ReminderSettings } from "./promemoria";
 export interface VaultSyncSettings {
   enabled: boolean;
   account: string;
-  calendarId: string;
+  // Nome del calendario nota (o «Iscrizioni Esami») → id del calendario Google con lo stesso nome
+  map: Record<string, string>;
   // Le note con fine più vecchia di N giorni non vengono mandate a Google
   pastDays: number;
 }
@@ -15,7 +16,7 @@ export interface VaultSyncSettings {
 export const DEFAULT_VAULT_SYNC: VaultSyncSettings = {
   enabled: false,
   account: "",
-  calendarId: "",
+  map: {},
   pastDays: 30,
 };
 
@@ -28,6 +29,14 @@ interface Host extends Plugin {
   };
   saveSettings(): Promise<void>;
   refreshViews(): void;
+}
+
+export const REMINDERS_KEY = "Iscrizioni Esami";
+
+interface Source {
+  key: string;
+  folder: string;
+  stripNumber: boolean;
 }
 
 interface Remote {
@@ -65,13 +74,15 @@ export class VaultSync {
     return this.plugin.settings.vaultSync;
   }
 
-  // Cartelle sincronizzate: calendari nota + promemoria iscrizione esami
-  private sources(): { folder: string; stripNumber: boolean }[] {
+  // Sorgenti sincronizzate: un calendario nota = un calendario Google con lo stesso nome.
+  // I promemoria iscrizione esami hanno il proprio calendario.
+  sources(): Source[] {
     const { noteCalendars, reminders } = this.plugin.settings;
-    const out = noteCalendars
-      .filter((c) => c.folder)
-      .map((c) => ({ folder: c.folder, stripNumber: c.name !== "Dentista" }));
-    if (reminders.enabled && reminders.remFolder) out.push({ folder: reminders.remFolder, stripNumber: false });
+    const out: Source[] = noteCalendars
+      .filter((c) => c.folder && c.name)
+      .map((c) => ({ key: c.name, folder: c.folder, stripNumber: c.name !== "Dentista" }));
+    if (reminders.enabled && reminders.remFolder)
+      out.push({ key: REMINDERS_KEY, folder: reminders.remFolder, stripNumber: false });
     return out;
   }
 
@@ -108,20 +119,19 @@ export class VaultSync {
     this.timer = window.setTimeout(() => void this.sync(false), delay);
   }
 
-  private async collect(): Promise<Map<string, Wanted>> {
-    const { vault, metadataCache } = this.plugin.app;
+  private async collect(src: Source): Promise<Map<string, Wanted>> {
+    const { vault } = this.plugin.app;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - this.cfg.pastDays);
     const cut = fmt(cutoff);
     const want = new Map<string, Wanted>();
     for (const f of vault.getMarkdownFiles()) {
-      const src = this.sources().find((s) => f.path.startsWith(s.folder + "/"));
-      if (!src) continue;
+      if (!f.path.startsWith(src.folder + "/")) continue;
       const form = this.formFromNote(f, src.stripNumber);
       if (!form || (form.endDate || form.date) < cut) continue;
       const body = {
         ...bodyFromForm(form),
-        // Notifiche: quelle predefinite del calendario «Vault» in Google Calendar
+        // Notifiche: quelle predefinite del calendario in Google Calendar
         reminders: { useDefault: true },
       };
       const hash = hashString(JSON.stringify(body));
@@ -146,8 +156,8 @@ export class VaultSync {
     return { title, date, endDate, allDay, startTime, endTime, location: "", description: "" };
   }
 
-  private async listRemote(ctx: GoogleCtx): Promise<Remote[]> {
-    const { account, calendarId } = this.cfg;
+  private async listRemote(ctx: GoogleCtx, calendarId: string): Promise<Remote[]> {
+    const { account } = this.cfg;
     const out: Remote[] = [];
     let token = "";
     do {
@@ -165,48 +175,51 @@ export class VaultSync {
   }
 
   async sync(manual: boolean) {
-    const { account, calendarId, enabled } = this.cfg;
+    const { account, enabled, map } = this.cfg;
     if (this.syncing || !enabled) return;
-    if (!account || !calendarId) {
-      if (manual) new Notice("Sync Google: scegli account e calendario nelle impostazioni");
+    const todo = this.sources().filter((src) => map[src.key]);
+    if (!account || !todo.length) {
+      if (manual) new Notice("Sync Google: scegli l'account e collega i calendari nelle impostazioni");
       return;
     }
     this.syncing = true;
     try {
       const plugin = this.plugin;
       const ctx: GoogleCtx = { google: plugin.settings.google, save: () => plugin.saveSettings() };
-      const want = await this.collect();
-      const remote = new Map((await this.listRemote(ctx)).map((e) => [e.id, e]));
       let created = 0,
         updated = 0,
         deleted = 0;
-      for (const [id, w] of want) {
-        const r = remote.get(id);
-        if (r && r.status !== "cancelled" && r.extendedProperties?.private?.h === w.hash) continue;
-        const body = { ...w.body, id };
-        if (r) {
-          await api(ctx, account, eventsUrl(calendarId, id), "PATCH", { ...w.body, status: "confirmed" });
-          updated++;
-        } else {
-          try {
-            await api(ctx, account, eventsUrl(calendarId), "POST", body);
-            created++;
-          } catch (e) {
-            // 409: id già usato da un evento cancellato in precedenza → lo riattiva
-            if (!String(e).includes(" 409")) throw e;
+      for (const src of todo) {
+        const calendarId = map[src.key];
+        const want = await this.collect(src);
+        const remote = new Map((await this.listRemote(ctx, calendarId)).map((e) => [e.id, e]));
+        for (const [id, w] of want) {
+          const r = remote.get(id);
+          if (r && r.status !== "cancelled" && r.extendedProperties?.private?.h === w.hash) continue;
+          if (r) {
             await api(ctx, account, eventsUrl(calendarId, id), "PATCH", { ...w.body, status: "confirmed" });
             updated++;
+          } else {
+            try {
+              await api(ctx, account, eventsUrl(calendarId), "POST", { ...w.body, id });
+              created++;
+            } catch (e) {
+              // 409: id già usato da un evento cancellato in precedenza → lo riattiva
+              if (!String(e).includes(" 409")) throw e;
+              await api(ctx, account, eventsUrl(calendarId, id), "PATCH", { ...w.body, status: "confirmed" });
+              updated++;
+            }
           }
         }
-      }
-      for (const [id, r] of remote) {
-        if (want.has(id) || r.status === "cancelled") continue;
-        await api(ctx, account, eventsUrl(calendarId, id), "DELETE");
-        deleted++;
+        for (const [id, r] of remote) {
+          if (want.has(id) || r.status === "cancelled") continue;
+          await api(ctx, account, eventsUrl(calendarId, id), "DELETE");
+          deleted++;
+        }
       }
       clearGoogleCache();
       if (manual || created + updated + deleted > 0)
-        new Notice(`Google «Vault»: ${created} creati, ${updated} aggiornati, ${deleted} eliminati`);
+        new Notice(`Google: ${created} creati, ${updated} aggiornati, ${deleted} eliminati`);
     } catch (e) {
       console.error("Calendario Vault: sync Google", e);
       new Notice(`Sync Google fallito: ${e instanceof Error ? e.message : String(e)}`);

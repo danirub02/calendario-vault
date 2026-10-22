@@ -268,7 +268,7 @@ export class CalendarioSettingTab extends PluginSettingTab {
     containerEl.createEl("h2", { text: "Sync su Google Calendar (per widget e notifiche)" });
     const v = s.vaultSync;
     containerEl.createEl("p", {
-      text: "Copia a senso unico (note → Google) di tutti i calendari nota e dei promemoria esami. Crea prima su calendar.google.com un calendario vuoto chiamato «Vault» e scegli qui sotto account e calendario. Non attivare lo stesso calendario anche tra i «Calendari esterni». Notifiche: quelle predefinite del calendario in Google.",
+      text: "Copia a senso unico (note → Google): un calendario Google per ogni calendario nota, collegato per nome. Crea prima su calendar.google.com un calendario vuoto con lo stesso nome di ciascun calendario nota (e «Iscrizioni Esami» per i promemoria), poi premi «Collega calendari». Non attivare gli stessi calendari anche tra i «Calendari esterni». Notifiche e colori: quelli del calendario in Google.",
     });
     new Setting(containerEl).setName("Attiva sync").addToggle((t) =>
       t.setValue(v.enabled).onChange(async (val) => {
@@ -281,27 +281,34 @@ export class CalendarioSettingTab extends PluginSettingTab {
       g.accounts.forEach((a) => d.addOption(a.email, a.email));
       d.setValue(v.account).onChange(async (val) => {
         v.account = val;
+        v.map = {};
         await this.plugin.saveSettings();
+        this.display();
       });
     });
+    const sources = [
+      ...s.noteCalendars.filter((c) => c.name && c.folder).map((c) => c.name),
+      ...(s.reminders.enabled ? ["Iscrizioni Esami"] : []),
+    ];
     new Setting(containerEl)
-      .setName("Calendario «Vault»")
-      .setDesc(v.calendarId || "Nessuno scelto")
+      .setName("Collega calendari")
+      .setDesc(sources.map((n) => `${v.map[n] ? "✓" : "✗"} ${n}`).join("  ·  ") || "Nessun calendario nota")
       .addButton((b) =>
-        b.setButtonText("Scegli…").onClick(async () => {
+        b.setButtonText("Collega calendari").onClick(async () => {
           if (!v.account) return new Notice("Scegli prima l'account");
           try {
             const list = await listCalendars({ google: g, save: () => this.plugin.saveSettings() }, v.account);
-            // Solo calendari di cui sei proprietario: uno condiviso con lo stesso nome riceverebbe i titoli delle note
-            const hits = list.filter((c) => c.owner && c.summary.trim().toLowerCase() === "vault");
-            if (hits.length !== 1)
-              return new Notice(
-                hits.length
-                  ? "Più calendari tuoi chiamati «Vault»: lasciane uno solo"
-                  : "Nessun calendario tuo chiamato «Vault» su questo account",
-              );
-            v.calendarId = hits[0].id;
+            // Solo calendari di cui sei proprietario, uno per nome: uno condiviso con lo stesso nome riceverebbe i titoli delle note
+            const map: Record<string, string> = {};
+            const problems: string[] = [];
+            for (const name of sources) {
+              const hits = list.filter((c) => c.owner && c.summary.trim().toLowerCase() === name.toLowerCase());
+              if (hits.length === 1) map[name] = hits[0].id;
+              else problems.push(`${name} (${hits.length ? "più di uno" : "manca"})`);
+            }
+            v.map = map;
             await this.plugin.saveSettings();
+            if (problems.length) new Notice(`Non collegati: ${problems.join(", ")}`);
             this.display();
           } catch (e) {
             new Notice(`Errore: ${e instanceof Error ? e.message : String(e)}`);
