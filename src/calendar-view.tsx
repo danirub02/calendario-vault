@@ -196,8 +196,12 @@ export class CalendarView extends BasesView {
       .split(",")
       .map((n) => n.trim().toLowerCase())
       .filter(Boolean);
+    // Il calendario Google «Vault» è la copia delle note: escluso per evitare doppioni
+    const vault = this.plugin.settings.vaultSync.calendarId;
     return this.plugin.settings.calendars.filter(
-      (c) => !names.length || names.includes(c.name.toLowerCase()),
+      (c) =>
+        (c.type !== "google" || c.calendarId !== vault || !vault) &&
+        (!names.length || names.includes(c.name.toLowerCase())),
     );
   }
 
