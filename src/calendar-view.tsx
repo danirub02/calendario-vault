@@ -391,6 +391,7 @@ export class CalendarView extends BasesView {
               week: "Week (hours)",
               weekdays: "Week (days only)",
               day: "Day (hours)",
+              threedays: "3 days (hours)",
             },
           },
           {

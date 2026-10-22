@@ -511,6 +511,10 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
     [properties, app, hasNonEmptyValue, narrow],
   );
 
+  // Viste a ore: altezza fissa, così scorrono solo le fasce orarie e la riga
+  // «Tutto il giorno» resta bloccata in cima.
+  const isTimeView = viewType === "week" || viewType === "day" || viewType === "threedays";
+
   return (
     <FullCalendar
       ref={calendarRef}
@@ -523,8 +527,11 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
             ? "dayGridWeek"
             : viewType === "day"
               ? "timeGridDay"
-              : "dayGridMonth"
+              : viewType === "threedays"
+                ? "timeGridThreeDay"
+                : "dayGridMonth"
       }
+      views={{ timeGridThreeDay: { type: "timeGrid", duration: { days: 3 }, buttonText: "3 giorni" } }}
       scrollTime="07:00:00"
       eventOrder="-allDay,start,-duration,title"
       nowIndicator={true}
@@ -539,7 +546,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
           ? { left: "prev,next", center: "title", right: "today" }
           : { left: "", center: "title", right: "prev,today,next" }
       }
-      footerToolbar={narrow ? { center: "dayGridMonth,timeGridWeek,timeGridDay" } : false}
+      footerToolbar={narrow ? { center: "dayGridMonth,timeGridWeek,timeGridThreeDay,timeGridDay" } : false}
       buttonText={{
         today: "Oggi",
         dayGridMonth: "Mese",
@@ -563,7 +570,7 @@ export const CalendarReactView: React.FC<CalendarReactViewProps> = ({
       eventClick={handleEventClick}
       eventMouseEnter={handleEventMouseEnter}
       eventDrop={(info) => void handleEventDrop(info)}
-      height="auto"
+      height={isTimeView ? "calc(100vh - 220px)" : "auto"}
       fixedWeekCount={viewType === "month"}
       fixedMirrorParent={document.body ?? undefined}
       eventDurationEditable={false}
