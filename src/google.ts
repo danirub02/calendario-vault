@@ -145,7 +145,7 @@ async function accessToken(ctx: GoogleCtx, email: string): Promise<string> {
   return acc.accessToken;
 }
 
-async function api<T>(
+export async function api<T>(
   ctx: GoogleCtx,
   email: string,
   url: string,
@@ -343,7 +343,7 @@ function rrule(r: NonNullable<GoogleEventForm["recurrence"]>, allDay: boolean): 
   return rule;
 }
 
-function bodyFromForm(f: GoogleEventForm): Record<string, unknown> {
+export function bodyFromForm(f: GoogleEventForm): Record<string, unknown> {
   const body: Record<string, unknown> = {
     summary: f.title,
     location: f.location,
@@ -365,7 +365,7 @@ function bodyFromForm(f: GoogleEventForm): Record<string, unknown> {
   return body;
 }
 
-const eventsUrl = (calendarId: string, eventId = "") =>
+export const eventsUrl = (calendarId: string, eventId = "") =>
   `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events${
     eventId ? "/" + encodeURIComponent(eventId) : ""
   }`;

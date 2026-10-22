@@ -3,6 +3,7 @@ import { CalendarView, CalendarViewType } from "./calendar-view";
 import { clearGoogleCache, createGoogleEvent, GoogleEventForm, GoogleCalendarRef } from "./google";
 import { EventModal, NoteCalendar } from "./nuovo-evento";
 import { DEFAULT_REMINDERS, ReminderSync } from "./promemoria";
+import { VaultSync } from "./vault-sync";
 import { CalendarioSettings, CalendarioSettingTab, DEFAULT_SETTINGS } from "./settings";
 
 export default class ObsidianCalendarPlugin extends Plugin {
@@ -21,6 +22,7 @@ export default class ObsidianCalendarPlugin extends Plugin {
       noteCalendars: data?.noteCalendars ?? [],
       reminders: { ...DEFAULT_REMINDERS, ...(data?.reminders ?? {}) },
       google: { ...DEFAULT_SETTINGS.google, ...(data?.google ?? {}) },
+      vaultSync: { ...DEFAULT_SETTINGS.vaultSync, ...(data?.vaultSync ?? {}) },
     };
     this.settings.google.accounts = data?.google?.accounts ?? [];
   }
@@ -34,7 +36,11 @@ export default class ObsidianCalendarPlugin extends Plugin {
   }
 
   googleCalendars(): GoogleCalendarRef[] {
-    return this.settings.calendars.filter((c): c is GoogleCalendarRef => c.type === "google" && c.enabled);
+    // Il calendario «Vault» è una copia delle note: mostrarlo darebbe doppioni
+    const vault = this.settings.vaultSync.calendarId;
+    return this.settings.calendars.filter(
+      (c): c is GoogleCalendarRef => c.type === "google" && c.enabled && c.calendarId !== vault,
+    );
   }
 
   async createGoogleEvent(cal: GoogleCalendarRef, form: GoogleEventForm) {
@@ -48,6 +54,7 @@ export default class ObsidianCalendarPlugin extends Plugin {
   }
 
   private reminders = new ReminderSync(this);
+  private vaultSync = new VaultSync(this);
 
   async onload() {
     await this.loadSettings();
@@ -64,6 +71,7 @@ export default class ObsidianCalendarPlugin extends Plugin {
     this.addCommand({ id: "nuovo-evento", name: "Crea nuovo evento", callback: openForm });
     this.addRibbonIcon("calendar-plus", "Nuovo evento", openForm);
     this.reminders.register();
+    this.vaultSync.register();
 
     this.registerBasesView(CalendarViewType, {
       name: "Calendar",
@@ -76,6 +84,7 @@ export default class ObsidianCalendarPlugin extends Plugin {
 
   onunload() {
     this.reminders.unload();
+    this.vaultSync.unload();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete (this.app.workspace as any).hoverLinkSources["bases"];
   }

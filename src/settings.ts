@@ -1,6 +1,7 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { NoteCalendar } from "./nuovo-evento";
 import { DEFAULT_REMINDERS, ReminderSettings } from "./promemoria";
+import { DEFAULT_VAULT_SYNC, VaultSyncSettings } from "./vault-sync";
 import { clearExternalCache, ExternalCalendar } from "./external";
 import {
   buildAuthUrl,
@@ -17,6 +18,7 @@ export interface CalendarioSettings {
   noteCalendars: NoteCalendar[];
   reminders: ReminderSettings;
   google: GoogleConfig;
+  vaultSync: VaultSyncSettings;
 }
 
 export const DEFAULT_SETTINGS: CalendarioSettings = {
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: CalendarioSettings = {
   noteCalendars: [],
   reminders: DEFAULT_REMINDERS,
   google: { clientId: "", clientSecret: "", accounts: [] },
+  vaultSync: DEFAULT_VAULT_SYNC,
 };
 
 interface Host extends Plugin {
@@ -261,6 +264,55 @@ export class CalendarioSettingTab extends PluginSettingTab {
         this.display();
       }),
     );
+
+    containerEl.createEl("h2", { text: "Sync su Google Calendar (per widget e notifiche)" });
+    const v = s.vaultSync;
+    containerEl.createEl("p", {
+      text: "Copia a senso unico (note → Google) di tutti i calendari nota e dei promemoria esami. Crea prima su calendar.google.com un calendario vuoto chiamato «Vault» e scegli qui sotto account e calendario. Non attivare lo stesso calendario anche tra i «Calendari esterni». Notifiche: quelle predefinite del calendario in Google.",
+    });
+    new Setting(containerEl).setName("Attiva sync").addToggle((t) =>
+      t.setValue(v.enabled).onChange(async (val) => {
+        v.enabled = val;
+        await this.plugin.saveSettings();
+      }),
+    );
+    new Setting(containerEl).setName("Account").addDropdown((d) => {
+      d.addOption("", "—");
+      g.accounts.forEach((a) => d.addOption(a.email, a.email));
+      d.setValue(v.account).onChange(async (val) => {
+        v.account = val;
+        await this.plugin.saveSettings();
+      });
+    });
+    new Setting(containerEl)
+      .setName("Calendario «Vault»")
+      .setDesc(v.calendarId || "Nessuno scelto")
+      .addButton((b) =>
+        b.setButtonText("Scegli…").onClick(async () => {
+          if (!v.account) return new Notice("Scegli prima l'account");
+          try {
+            const list = await listCalendars({ google: g, save: () => this.plugin.saveSettings() }, v.account);
+            const hit = list.find((c) => c.summary.trim().toLowerCase() === "vault");
+            if (!hit) return new Notice("Nessun calendario chiamato «Vault» su questo account");
+            v.calendarId = hit.id;
+            await this.plugin.saveSettings();
+            this.display();
+          } catch (e) {
+            new Notice(`Errore: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }),
+      );
+    new Setting(containerEl)
+      .setName("Giorni nel passato")
+      .setDesc("Le note con fine più vecchia di N giorni non vengono mandate (e vengono tolte da Google).")
+      .addText((t) => {
+        t.inputEl.type = "number";
+        t.inputEl.min = "0";
+        t.setValue(String(v.pastDays)).onChange(async (val) => {
+          v.pastDays = Math.max(0, parseInt(val) || 0);
+          await this.plugin.saveSettings();
+        });
+      });
 
     containerEl.createEl("h2", { text: "Promemoria iscrizione esami" });
     const r = s.reminders;
