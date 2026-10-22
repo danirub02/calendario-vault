@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS: CalendarioSettings = {
 };
 
 interface Host extends Plugin {
+  runVaultSync(): void;
   settings: CalendarioSettings;
   saveSettings(): Promise<void>;
 }
@@ -274,6 +275,7 @@ export class CalendarioSettingTab extends PluginSettingTab {
       t.setValue(v.enabled).onChange(async (val) => {
         v.enabled = val;
         await this.plugin.saveSettings();
+        if (val) this.plugin.runVaultSync();
       }),
     );
     new Setting(containerEl).setName("Account").addDropdown((d) => {
@@ -309,6 +311,7 @@ export class CalendarioSettingTab extends PluginSettingTab {
             v.map = map;
             await this.plugin.saveSettings();
             if (problems.length) new Notice(`Non collegati: ${problems.join(", ")}`);
+            this.plugin.runVaultSync();
             this.display();
           } catch (e) {
             new Notice(`Errore: ${e instanceof Error ? e.message : String(e)}`);

@@ -53,6 +53,11 @@ export default class ObsidianCalendarPlugin extends Plugin {
     }, 2500);
   }
 
+  // Chiamato dalle impostazioni dopo aver attivato il sync o collegato i calendari
+  runVaultSync() {
+    void this.vaultSync.sync(true);
+  }
+
   private reminders = new ReminderSync(this);
   private vaultSync = new VaultSync(this);
 
