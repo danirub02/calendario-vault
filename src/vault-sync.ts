@@ -115,7 +115,7 @@ export class VaultSync {
     window.clearTimeout(this.timer);
   }
 
-  private schedule(delay = 8000) {
+  private schedule(delay = 2000) {
     if (!this.cfg.enabled) return;
     window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => void this.sync(false), delay);
