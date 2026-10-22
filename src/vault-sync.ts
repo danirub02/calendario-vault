@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile } from "obsidian";
+import { Notice, Platform, Plugin, TFile } from "obsidian";
 import { fmt } from "./date-utils";
 import { api, bodyFromForm, clearGoogleCache, eventsUrl, GoogleCtx, GoogleEventForm } from "./google";
 import type { NoteCalendar } from "./nuovo-evento";
@@ -107,7 +107,8 @@ export class VaultSync {
       }),
     );
     plugin.registerEvent(app.metadataCache.on("changed", trigger));
-    app.workspace.onLayoutReady(() => this.schedule(10_000));
+    // Su mobile LiveSync può non aver ancora scaricato le note nuove: attesa più lunga
+    app.workspace.onLayoutReady(() => this.schedule(Platform.isMobile ? 30_000 : 10_000));
   }
 
   unload() {
@@ -212,6 +213,8 @@ export class VaultSync {
             }
           }
         }
+        // Su mobile il vault può essere incompleto (LiveSync in ritardo): le cancellazioni le fa il desktop
+        if (Platform.isMobile) continue;
         for (const [id, r] of remote) {
           if (want.has(id) || r.status === "cancelled") continue;
           await api(ctx, account, eventsUrl(calendarId, id), "DELETE");
