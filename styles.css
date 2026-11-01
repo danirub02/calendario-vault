@@ -432,3 +432,44 @@ body {
   }
 
 }
+
+
+/* ── Vista mese: titolo + frecce restano ancorati sopra i giorni della settimana ──
+ * Il mese ha altezza "auto" e scorre con la nota: toolbar sticky in cima,
+ * intestazione dei giorni (già sticky) spostata subito sotto di essa. */
+.bases-calendar-container {
+  --cv-toolbar-h: 44px;
+}
+
+.bases-calendar-container .fc:has(.fc-dayGridMonth-view) .fc-header-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  height: var(--cv-toolbar-h);
+  box-sizing: border-box;
+  align-items: center;
+  background-color: var(--background-primary);
+}
+
+.bases-calendar-container .fc:has(.fc-dayGridMonth-view) .fc-scrollgrid-section-sticky > * {
+  top: var(--cv-toolbar-h) !important;
+}
+
+.bases-calendar-container.is-narrow {
+  --cv-toolbar-h: 40px;
+}
+
+/* ── Oggi ben visibile (soprattutto in "solo giorni" e settimana) ── */
+.bases-calendar-container .fc-col-header-cell.fc-day-today {
+  background-color: var(--interactive-accent) !important;
+}
+
+.bases-calendar-container .fc-col-header-cell.fc-day-today a.fc-col-header-cell-cushion {
+  color: var(--text-on-accent) !important;
+  font-weight: 700 !important;
+}
+
+.bases-calendar-container .fc-daygrid-day.fc-day-today,
+.bases-calendar-container .fc-timegrid-col.fc-day-today {
+  background-color: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary)) !important;
+}
